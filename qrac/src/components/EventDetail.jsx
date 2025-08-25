@@ -106,7 +106,7 @@ function GuestsTab({ event, addGuest, removeGuest, updateGuest, secret }) {
   const [expiresAt, setExpiresAt] = useState("");
 
   return (
-    <div className="mt-4 grid gap-6 lg:grid-cols-2">
+    <div className="mt-4 grid gap-6 lg:grid-cols-[1fr_2fr]">
       <div>
         <h3 className="font-medium mb-2">Alta manual</h3>
         <div className="space-y-2">
