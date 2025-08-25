@@ -52,7 +52,7 @@ export default function App() {
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900">
       <header className="sticky top-0 z-10 bg-gradient-to-r from-indigo-600 to-violet-600 text-white shadow">
-        <div className="max-w-6xl mx-auto px-4 py-3 flex items-center justify-between">
+        <div className="max-w-7xl mx-auto px-4 py-3 flex items-center justify-between">
           <h1 className="text-2xl font-semibold tracking-tight">
             QR Access Control — MVP
           </h1>
@@ -60,7 +60,7 @@ export default function App() {
         </div>
       </header>
 
-      <main className="max-w-6xl mx-auto p-4 flex flex-col lg:flex-row gap-4">
+      <main className="max-w-7xl mx-auto p-4 flex flex-col lg:flex-row gap-4">
         <div className="lg:w-64">
           <EventList
             events={events}
