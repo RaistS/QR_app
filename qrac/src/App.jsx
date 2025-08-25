@@ -1,0 +1,1343 @@
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import QRCode from "qrcode";
+import jsQR from "jsqr";
+import Papa from "papaparse";
+import { v4 as uuidv4 } from "uuid";
+
+const STORAGE_KEYS = {
+  events: "qrac_events_v1",
+  logs: "qrac_logs_v1",
+  secret: "qrac_secret_v1",
+};
+
+const base64url = {
+  encode: (buf) =>
+    btoa(String.fromCharCode(...new Uint8Array(buf)))
+      .replace(/\+/g, "-")
+      .replace(/\//g, "_")
+      .replace(/=+$/g, ""),
+  decode: (str) => {
+    const pad = str.length % 4 === 0 ? 0 : 4 - (str.length % 4);
+    const s = str.replace(/-/g, "+").replace(/_/g, "/") + "=".repeat(pad);
+    const bin = atob(s);
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    return bytes.buffer;
+  },
+};
+
+async function hmacImportKey(secret) {
+  console.log("[hmacImportKey] importing key");
+  let raw;
+  try {
+    if (/^[A-Za-z0-9_-]{43,}$/.test(secret)) raw = base64url.decode(secret);
+  } catch (_) {}
+  if (!raw) raw = new TextEncoder().encode(secret);
+  return crypto.subtle.importKey(
+    "raw",
+    raw,
+    { name: "HMAC", hash: { name: "SHA-256" } },
+    false,
+    ["sign", "verify"]
+  );
+}
+
+async function hmacSign(secret, data) {
+  console.log("[hmacSign] data", new TextDecoder().decode(data));
+  const key = await hmacImportKey(secret);
+  const sig = await crypto.subtle.sign("HMAC", key, data);
+  console.log("[hmacSign] signature length", sig.byteLength);
+  return new Uint8Array(sig);
+}
+
+async function hmacVerify(secret, data, signature) {
+  console.log("[hmacVerify] verifying signature");
+  const key = await hmacImportKey(secret);
+  const result = await crypto.subtle.verify("HMAC", key, signature, data);
+  console.log("[hmacVerify] result", result);
+  return result;
+}
+
+function downloadBlob(filename, mime, content) {
+  console.log("[downloadBlob] filename", filename, "mime", mime);
+  const blob = new Blob([content], { type: mime });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
+function nowISO() {
+  return new Date().toISOString();
+}
+
+function fmtDateTime(d) {
+  const date = typeof d === "string" ? new Date(d) : d;
+  return new Intl.DateTimeFormat(undefined, {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(date);
+}
+
+function useLocalStorage(key, initial) {
+  console.log("[useLocalStorage] init", key);
+  const [state, setState] = useState(() => {
+    try {
+      const raw = localStorage.getItem(key);
+      return raw ? JSON.parse(raw) : initial;
+    } catch (e) {
+      return initial;
+    }
+  });
+  useEffect(() => {
+    try {
+      localStorage.setItem(key, JSON.stringify(state));
+      console.log("[useLocalStorage] updated", key, state);
+    } catch (e) {
+      console.error("[useLocalStorage] error saving", e);
+    }
+  }, [key, state]);
+  return [state, setState];
+}
+
+async function copyToClipboard(text) {
+  console.log("[copyToClipboard] text", text);
+  try {
+    if (navigator.clipboard && window.isSecureContext) {
+      await navigator.clipboard.writeText(text);
+      console.log("[copyToClipboard] success via clipboard API");
+      return true;
+    }
+  } catch (e) {
+    console.warn("[copyToClipboard] clipboard API failed", e);
+  }
+  try {
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    ta.setAttribute("readonly", "");
+    ta.style.position = "fixed";
+    ta.style.top = "-1000px";
+    document.body.appendChild(ta);
+    ta.select();
+    ta.setSelectionRange(0, ta.value.length);
+    const ok = document.execCommand("copy");
+    document.body.removeChild(ta);
+    if (ok) {
+      console.log("[copyToClipboard] success via execCommand");
+      return true;
+    }
+  } catch (e) {
+    console.warn("[copyToClipboard] execCommand failed", e);
+  }
+  try {
+    window.prompt("Copia el contenido y pulsa Aceptar", text);
+    console.log("[copyToClipboard] fallback prompt used");
+  } catch (e) {
+    console.error("[copyToClipboard] all methods failed", e);
+  }
+  return false;
+}
+
+export default function App() {
+  console.log("[App] render");
+  const [events, setEvents] = useLocalStorage(STORAGE_KEYS.events, []);
+  const [logs, setLogs] = useLocalStorage(STORAGE_KEYS.logs, []);
+  const [secret, setSecret] = useLocalStorage(
+    STORAGE_KEYS.secret,
+    generateSecret()
+  );
+  const [selectedEventId, setSelectedEventId] = useState(null);
+  const selectedEvent = useMemo(
+    () => events.find((e) => e.id === selectedEventId) || null,
+    [events, selectedEventId]
+  );
+
+  // ⛔ No registrar Service Worker en desarrollo (evita pantalla en blanco/cachés raras)
+  useEffect(() => {
+    if (!("serviceWorker" in navigator) || !import.meta.env.PROD) return;
+
+    console.log("[App] service worker setup (prod)");
+    const swCode = `self.addEventListener('install', e=>{self.skipWaiting()});self.addEventListener('activate', e=>{self.clients.claim()});self.addEventListener('fetch', e=>{e.respondWith((async()=>{try{return await fetch(e.request)}catch(_){return caches.match('shell')||new Response('<!doctype html><title>Offline</title><h1>Estás offline</h1>',{headers:{'Content-Type':'text/html'}})}})())});`;
+    const shell = document.documentElement.outerHTML;
+    (async () => {
+      try {
+        const swBlob = new Blob([swCode], { type: "text/javascript" });
+        const swUrl = URL.createObjectURL(swBlob);
+        const reg = await navigator.serviceWorker.register(swUrl);
+        console.log("[SW] registered", reg);
+        const c = await caches.open("qrac-shell");
+        await c.put(
+          "shell",
+          new Response(shell, { headers: { "Content-Type": "text/html" } })
+        );
+        setTimeout(() => URL.revokeObjectURL(swUrl), 5000);
+      } catch (e) {
+        console.warn("[SW error]", e);
+      }
+    })();
+  }, []);
+
+  useEffect(() => {
+    // Tests ligeros en consola
+    runSelfTests();
+  }, []);
+
+  return (
+
+    <div className="min-h-screen bg-slate-50 text-slate-900">
+      <header className="sticky top-0 z-10 bg-gradient-to-r from-indigo-600 to-violet-600 text-white shadow">
+        <div className="max-w-6xl mx-auto px-4 py-3 flex items-center justify-between">
+          <h1 className="text-2xl font-semibold tracking-tight">
+            QR Access Control — MVP
+          </h1>
+          <SecretManager secret={secret} setSecret={setSecret} />
+        </div>
+      </header>
+
+      <main className="max-w-6xl mx-auto px-4 py-6 grid gap-6 lg:grid-cols-3">
+        <section className="lg:col-span-1">
+          <EventList
+            events={events}
+            onSelect={setSelectedEventId}
+            selectedId={selectedEventId}
+            onCreate={(evt) => setEvents((p) => [...p, evt])}
+            onDelete={(id) => {
+              setEvents((p) => p.filter((e) => e.id !== id));
+              localStorage.removeItem(`used_${id}`);
+              if (selectedEventId === id) setSelectedEventId(null);
+            }}
+            onExport={() =>
+              downloadBlob(
+                `qrac_backup_${new Date().toISOString().slice(0, 10)}.json`,
+                "application/json",
+                JSON.stringify({ events, logs, secret }, null, 2)
+              )
+            }
+            onImport={(data) => {
+              try {
+                const obj = JSON.parse(data);
+                if (obj.events) setEvents(obj.events);
+                if (obj.logs) setLogs(obj.logs);
+                if (obj.secret) setSecret(obj.secret);
+                alert("Datos importados correctamente");
+              } catch (e) {
+                alert("Archivo no válido");
+              }
+            }}
+          />
+        </section>
+
+        <section className="lg:col-span-2">
+          {selectedEvent ? (
+            <EventDetail
+              event={selectedEvent}
+              events={events}
+              setEvents={setEvents}
+              secret={secret}
+              logs={logs}
+              setLogs={setLogs}
+            />
+          ) : (
+            <EmptyState />
+          )}
+        </section>
+      </main>
+
+      <footer className="border-t bg-white/60">
+        <div className="max-w-6xl mx-auto px-4 py-3 text-sm text-gray-600 flex flex-wrap gap-4 items-center justify-between">
+          <p>
+            Todos los datos se guardan en tu navegador (localStorage). Puedes
+            exportar/importar un backup JSON.
+          </p>
+          <p>
+            Consejo: comparte el <span className="font-semibold">Secreto de firma</span> con
+            otros dispositivos para validar los mismos QR.
+          </p>
+        </div>
+      </footer>
+    </div>
+  );
+}
+
+function EmptyState() {
+  return (
+    <div className="h-full w-full flex items-center justify-center">
+      <div className="text-center max-w-md">
+        <h2 className="text-lg font-medium">
+          Crea un evento o selecciona uno existente
+        </h2>
+        <p className="text-sm text-gray-600 mt-2">
+          Gestiona invitados, genera credenciales con QR firmados, escanea y
+          registra check-ins. Funciona offline.
+        </p>
+      </div>
+    </div>
+  );
+}
+
+function SecretManager({ secret, setSecret }) {
+  const [visible, setVisible] = useState(false);
+  const weak = typeof secret === "string" && secret.length < 32;
+  return (
+    <div className="flex items-center gap-2">
+      <button
+        className="px-3 py-1.5 rounded-xl bg-gray-900 text-white text-sm shadow"
+        onClick={() => setSecret(generateSecret())}
+        title="Generar un nuevo secreto aleatorio (rotación)"
+      >
+        Rotar secreto
+      </button>
+      <button
+        className="px-3 py-1.5 rounded-xl bg-gray-100 text-sm border"
+        onClick={async () => {
+          const ok = await copyToClipboard(secret);
+          alert(
+            ok
+              ? "Secreto copiado"
+              : "No se pudo copiar automáticamente. Se mostró el texto para que lo copies manualmente."
+          );
+        }}
+      >
+        Copiar secreto
+      </button>
+      <button
+        className="px-2 py-1 rounded-lg text-sm border"
+        onClick={() => setVisible((v) => !v)}
+      >
+        {visible ? "Ocultar" : "Ver"}
+      </button>
+      <input
+        className={`ml-2 w-64 px-2 py-1 text-sm border rounded-lg bg-white ${
+          weak ? "border-red-400" : ""
+        }`}
+        value={visible ? secret : "•".repeat(12)}
+        onChange={(e) => setSecret(e.target.value)}
+        title="Secreto de firma HMAC (compártelo para validar en otros dispositivos)"
+      />
+    </div>
+  );
+}
+
+function EventList({
+  events,
+  onSelect,
+  selectedId,
+  onCreate,
+  onDelete,
+  onExport,
+  onImport,
+}) {
+  const [name, setName] = useState("");
+  const [date, setDate] = useState("");
+  const [location, setLocation] = useState("");
+
+  return (
+    <div className="bg-white rounded-2xl shadow p-4 sticky top-20">
+      <h2 className="text-lg font-semibold mb-3">Eventos</h2>
+
+      <ul className="space-y-1 mb-4 max-h-72 overflow-auto pr-1">
+        {events.map((e) => (
+          <li
+            key={e.id}
+            className={`flex items-center justify-between gap-2 p-2 rounded-xl border ${
+              selectedId === e.id ? "bg-gray-100 border-gray-400" : "bg-white"
+            }`}
+          >
+            <button
+              onClick={() => onSelect(e.id)}
+              className="flex-1 text-left"
+              title="Seleccionar"
+            >
+              <div className="font-medium">{e.name}</div>
+              <div className="text-xs text-gray-500">
+                {e.date ? fmtDateTime(e.date) : "Sin fecha"} —{" "}
+                {e.location || "Sin ubicación"}
+              </div>
+            </button>
+            <button
+              className="text-xs text-red-600 hover:underline"
+              onClick={() => {
+                if (confirm("¿Eliminar evento y sus invitados?")) onDelete(e.id);
+              }}
+            >
+              Eliminar
+            </button>
+          </li>
+        ))}
+        {!events.length && (
+          <li className="text-sm text-gray-500">Aún no hay eventos.</li>
+        )}
+      </ul>
+
+      <div className="border-t pt-3 space-y-2">
+        <h3 className="text-sm font-medium">Crear evento</h3>
+        <input
+          className="w-full px-3 py-2 border rounded-xl"
+          placeholder="Nombre del evento"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+        />
+        <input
+          className="w-full px-3 py-2 border rounded-xl"
+          type="datetime-local"
+          value={date}
+          onChange={(e) => setDate(e.target.value)}
+        />
+        <input
+          className="w-full px-3 py-2 border rounded-xl"
+          placeholder="Ubicación"
+          value={location}
+          onChange={(e) => setLocation(e.target.value)}
+        />
+        <button
+          className="w-full py-2 rounded-xl bg-gray-900 text-white"
+          onClick={() => {
+            if (!name.trim()) return alert("El nombre es obligatorio");
+            onCreate({
+              id: uuidv4(),
+              name: name.trim(),
+              date,
+              location,
+              guests: [],
+            });
+            setName("");
+            setDate("");
+            setLocation("");
+          }}
+        >
+          Crear
+        </button>
+      </div>
+
+      <div className="border-t mt-4 pt-3 space-y-2">
+        <h3 className="text-sm font-medium">Backup</h3>
+        <div className="flex gap-2">
+          <button className="flex-1 py-2 rounded-xl border" onClick={onExport}>
+            Exportar JSON
+          </button>
+          <label className="flex-1 py-2 rounded-xl border text-center cursor-pointer">
+            Importar JSON
+            <input
+              type="file"
+              accept="application/json"
+              className="hidden"
+              onChange={async (e) => {
+                const f = e.target.files?.[0];
+                if (!f) return;
+                const text = await f.text();
+                onImport(text);
+                e.target.value = "";
+              }}
+            />
+          </label>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function EventDetail({ event, events, setEvents, secret, logs, setLogs }) {
+  const [tab, setTab] = useState("guests");
+  const idx = events.findIndex((e) => e.id === event.id);
+
+  const updateEvent = (patch) => {
+    const next = [...events];
+    next[idx] = { ...event, ...patch };
+    setEvents(next);
+  };
+
+  const addGuest = (g) => updateEvent({ guests: [...event.guests, g] });
+  const removeGuest = (gid) =>
+    updateEvent({ guests: event.guests.filter((g) => g.id !== gid) });
+  const updateGuest = (gid, patch) =>
+    updateEvent({
+      guests: event.guests.map((g) => (g.id === gid ? { ...g, ...patch } : g)),
+    });
+
+  return (
+    <div className="bg-white rounded-2xl shadow p-4">
+      <div className="flex items-center justify-between gap-4 flex-wrap">
+        <div>
+          <h2 className="text-xl font-semibold">{event.name}</h2>
+          <div className="text-sm text-gray-600">
+            {event.date ? fmtDateTime(event.date) : "Sin fecha"} —{" "}
+            {event.location || "Sin ubicación"}
+          </div>
+        </div>
+        <div className="flex gap-2 text-sm">
+          <button
+            className={`px-3 py-1.5 rounded-xl border ${
+              tab === "guests" ? "bg-gray-900 text-white" : "bg-white"
+            }`}
+            onClick={() => setTab("guests")}
+          >
+            Invitados
+          </button>
+          <button
+            className={`px-3 py-1.5 rounded-xl border ${
+              tab === "scan" ? "bg-gray-900 text-white" : "bg-white"
+            }`}
+            onClick={() => setTab("scan")}
+          >
+            Escanear
+          </button>
+          <button
+            className={`px-3 py-1.5 rounded-xl border ${
+              tab === "export" ? "bg-gray-900 text-white" : "bg-white"
+            }`}
+            onClick={() => setTab("export")}
+          >
+            Exportar
+          </button>
+          <button
+            className={`px-3 py-1.5 rounded-xl border ${
+              tab === "print" ? "bg-gray-900 text-white" : "bg-white"
+            }`}
+            onClick={() => setTab("print")}
+          >
+            Credenciales
+          </button>
+        </div>
+      </div>
+
+      {tab === "guests" && (
+        <GuestsTab
+          event={event}
+          addGuest={addGuest}
+          removeGuest={removeGuest}
+          updateGuest={updateGuest}
+          secret={secret}
+        />
+      )}
+      {tab === "scan" && (
+        <ScanTab event={event} secret={secret} logs={logs} setLogs={setLogs} />
+      )}
+      {tab === "export" && <ExportTab event={event} logs={logs} />}
+      {tab === "print" && <PrintTab event={event} secret={secret} />}
+    </div>
+  );
+}
+
+function GuestsTab({ event, addGuest, removeGuest, updateGuest, secret }) {
+  const [name, setName] = useState("");
+  const [email, setEmail] = useState("");
+  const [role, setRole] = useState("");
+  const [note, setNote] = useState("");
+  const [expiresAt, setExpiresAt] = useState("");
+
+  return (
+    <div className="mt-4 grid gap-6 lg:grid-cols-2">
+      <div>
+        <h3 className="font-medium mb-2">Alta manual</h3>
+        <div className="space-y-2">
+          <input
+            className="w-full px-3 py-2 border rounded-xl"
+            placeholder="Nombre"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+          />
+          <input
+            className="w-full px-3 py-2 border rounded-xl"
+            placeholder="Email (opcional)"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+          />
+          <div className="grid grid-cols-2 gap-2">
+            <input
+              className="px-3 py-2 border rounded-xl"
+              placeholder="Rol (VIP, Staff, etc.)"
+              value={role}
+              onChange={(e) => setRole(e.target.value)}
+            />
+            <input
+              className="px-3 py-2 border rounded-xl"
+              type="datetime-local"
+              value={expiresAt}
+              onChange={(e) => setExpiresAt(e.target.value)}
+              title="Caducidad del QR (opcional)"
+            />
+          </div>
+          <textarea
+            className="w-full px-3 py-2 border rounded-xl"
+            placeholder="Nota"
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+          />
+          <button
+            className="w-full py-2 rounded-xl bg-gray-900 text-white"
+            onClick={() => {
+              if (!name.trim()) return alert("Nombre requerido");
+              addGuest({
+                id: uuidv4(),
+                name: name.trim(),
+                email: email.trim(),
+                role: role.trim(),
+                note: note.trim(),
+                expiresAt,
+              });
+              setName("");
+              setEmail("");
+              setRole("");
+              setNote("");
+              setExpiresAt("");
+            }}
+          >
+            Añadir invitado
+          </button>
+        </div>
+
+        <div className="mt-6 space-y-2">
+          <h3 className="font-medium">Importación CSV</h3>
+          <p className="text-xs text-gray-600">
+            Cabeceras soportadas: <code>name,email,role,note,expiresAt</code>.
+            Formato de fecha: ISO o <code>YYYY-MM-DD HH:mm</code>.
+          </p>
+          <div className="flex items-center gap-2">
+            <label className="px-3 py-2 rounded-xl border cursor-pointer">
+              Subir CSV
+              <input
+                type="file"
+                accept=".csv,text/csv"
+                className="hidden"
+                onChange={async (e) => {
+                  const f = e.target.files?.[0];
+                  if (!f) return;
+                  const text = await f.text();
+                  Papa.parse(text, {
+                    header: true,
+                    skipEmptyLines: true,
+                    complete: (res) => {
+                      const rows = res.data || [];
+                      const added = [];
+                      rows.forEach((r) => {
+                        const g = {
+                          id: uuidv4(),
+                          name: (r.name || "").trim(),
+                          email: (r.email || "").trim(),
+                          role: (r.role || "").trim(),
+                          note: (r.note || "").trim(),
+                          expiresAt: (r.expiresAt || "").trim(),
+                        };
+                        if (g.name) {
+                          added.push(g);
+                        }
+                      });
+                      if (!added.length)
+                        return alert("No se encontraron filas válidas");
+                      added.forEach(addGuest);
+                      alert(`Importados ${added.length} invitados`);
+                    },
+                  });
+                  e.target.value = "";
+                }}
+              />
+            </label>
+            <button
+              className="px-3 py-2 rounded-xl border"
+              onClick={() => {
+                const sample =
+                  `name,email,role,note,expiresAt\n` +
+                  `Ada Lovelace,ada@demo.com,VIP,,2025-12-31 23:59\n` +
+                  `Luis Pérez,luis@demo.com,Invitado,,\n`;
+                downloadBlob("invitados_ejemplo.csv", "text/csv", sample);
+              }}
+            >
+              CSV ejemplo
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div>
+        <h3 className="font-medium mb-2">
+          Invitados ({event.guests.length})
+        </h3>
+        <ul className="max-h-[28rem] overflow-auto pr-1 space-y-2">
+          {event.guests.map((g) => (
+            <li
+              key={g.id}
+              className="p-3 rounded-xl border bg-white flex flex-col gap-2"
+            >
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <div className="font-medium">
+                    {g.name}{" "}
+                    {g.role && (
+                      <span className="text-xs text-gray-500">— {g.role}</span>
+                    )}
+                  </div>
+                  {g.email && (
+                    <div className="text-xs text-gray-500">{g.email}</div>
+                  )}
+                </div>
+                <div className="flex items-center gap-2">
+                  <QRButton eventId={event.id} guest={g} secret={secret} />
+                  <button
+                    className="text-xs text-red-600 hover:underline"
+                    onClick={() => {
+                      if (confirm("¿Eliminar invitado?")) removeGuest(g.id);
+                    }}
+                  >
+                    Eliminar
+                  </button>
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-2 text-sm">
+                <label className="flex items-center gap-2">
+                  Caduca:
+                  <input
+                    className="flex-1 px-2 py-1 border rounded-lg"
+                    type="datetime-local"
+                    value={g.expiresAt || ""}
+                    onChange={(e) =>
+                      updateGuest(g.id, { expiresAt: e.target.value })
+                    }
+                  />
+                </label>
+                <label className="flex items-center gap-2">
+                  Rol:
+                  <input
+                    className="flex-1 px-2 py-1 border rounded-lg"
+                    value={g.role || ""}
+                    onChange={(e) => updateGuest(g.id, { role: e.target.value })}
+                  />
+                </label>
+              </div>
+              <textarea
+                className="w-full px-2 py-1 border rounded-lg text-sm"
+                placeholder="Nota"
+                value={g.note || ""}
+                onChange={(e) => updateGuest(g.id, { note: e.target.value })}
+              />
+            </li>
+          ))}
+          {!event.guests.length && (
+            <li className="text-sm text-gray-500">Aún no hay invitados.</li>
+          )}
+        </ul>
+      </div>
+    </div>
+  );
+}
+
+function makePayload({ eventId, guest, version = 1 }) {
+  const payload = {
+    v: version,
+    eid: eventId,
+    gid: guest.id,
+    jti: crypto.randomUUID(),
+    iat: new Date().toISOString(),
+  };
+  if (guest.expiresAt) payload.exp = new Date(guest.expiresAt).toISOString();
+  return payload;
+}
+
+async function tokenFromPayload(payload, secret) {
+  const json = new TextEncoder().encode(JSON.stringify(payload));
+  const sig = await hmacSign(secret, json);
+  const t = base64url.encode(json) + "." + base64url.encode(sig);
+  return "QRAC1." + t; // prefijo para identificar
+}
+
+async function verifyToken(token, secret) {
+  if (!token.startsWith("QRAC1."))
+    return { ok: false, reason: "Formato inválido" };
+  const body = token.slice("QRAC1.".length);
+  const [payloadB64, sigB64] = body.split(".");
+  if (!payloadB64 || !sigB64)
+    return { ok: false, reason: "Token incompleto" };
+  const jsonBuf = base64url.decode(payloadB64);
+  const sigBuf = base64url.decode(sigB64);
+  const ok = await hmacVerify(secret, jsonBuf, sigBuf);
+  if (!ok) return { ok: false, reason: "Firma no válida" };
+  const payload = JSON.parse(new TextDecoder().decode(jsonBuf));
+  if (payload.exp && new Date(payload.exp) < new Date()) {
+    return { ok: false, reason: "QR caducado", payload };
+  }
+  return { ok: true, payload };
+}
+
+function QRButton({ eventId, guest, secret }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <>
+      <button
+        className="px-3 py-1.5 text-sm rounded-xl border"
+        onClick={() => setOpen(true)}
+      >
+        Ver QR
+      </button>
+      {open && (
+        <Modal onClose={() => setOpen(false)}>
+          <QRCard eventId={eventId} guest={guest} secret={secret} />
+        </Modal>
+      )}
+    </>
+  );
+}
+
+function Modal({ children, onClose }) {
+  useEffect(() => {
+    const onKey = (e) => e.key === "Escape" && onClose();
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+  return (
+    <div
+      className="fixed inset-0 bg-black/50 flex items-center justify-center p-4"
+      onClick={onClose}
+    >
+      <div
+        className="bg-white rounded-2xl shadow-xl p-4 max-w-lg w-full"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex justify-end">
+          <button className="text-sm" onClick={onClose}>
+            Cerrar
+          </button>
+        </div>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+function QRCard({ eventId, guest, secret }) {
+  const [dataUrl, setDataUrl] = useState(null);
+  const [token, setToken] = useState("Generando…");
+
+  useEffect(() => {
+    (async () => {
+      const payload = makePayload({ eventId, guest });
+      const t = await tokenFromPayload(payload, secret);
+      setToken(t);
+      const url = await QRCode.toDataURL(t, { margin: 1, scale: 8 });
+      setDataUrl(url);
+    })();
+  }, [eventId, guest, secret]);
+
+  return (
+    <div className="grid gap-3 text-center">
+      <div>
+        <div className="text-xl font-semibold">{guest.name}</div>
+        {guest.role && (
+          <div className="text-sm text-gray-600">{guest.role}</div>
+        )}
+      </div>
+      {dataUrl ? (
+        <img src={dataUrl} alt="QR" className="mx-auto w-56 h-56" />
+      ) : (
+        <div className="w-56 h-56 mx-auto grid place-items-center border rounded-xl">
+          Creando QR…
+        </div>
+      )}
+      <div className="text-xs break-all bg-gray-50 border rounded-xl p-2">
+        {token}
+      </div>
+      <div className="flex gap-2 justify-center">
+        <button
+          className="px-3 py-1.5 rounded-xl border"
+          onClick={async () => {
+            const ok = await copyToClipboard(token);
+            alert(
+              ok
+                ? "Token copiado"
+                : "No se pudo copiar automáticamente. Se mostró el texto para que lo copies manualmente."
+            );
+          }}
+        >
+          Copiar token
+        </button>
+        {dataUrl && (
+          <button
+            className="px-3 py-1.5 rounded-xl border"
+            onClick={() => {
+              const a = document.createElement("a");
+              a.href = dataUrl;
+              a.download = `${guest.name}_QR.png`;
+              a.click();
+            }}
+          >
+            Descargar PNG
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function ScanTab({ event, secret, logs, setLogs }) {
+  const videoRef = useRef(null);
+  const canvasRef = useRef(null);
+  const [active, setActive] = useState(false);
+  const [last, setLast] = useState(null);
+  const [err, setErr] = useState("");
+  const lastTickRef = useRef(0);
+
+  useEffect(() => {
+    let rafId;
+    async function tick(ts) {
+      try {
+        if (ts - lastTickRef.current < 250) {
+          rafId = requestAnimationFrame(tick);
+          return;
+        }
+        lastTickRef.current = ts;
+        const video = videoRef.current;
+        const canvas = canvasRef.current;
+        if (!video || !canvas) {
+          rafId = requestAnimationFrame(tick);
+          return;
+        }
+        const w = video.videoWidth,
+          h = video.videoHeight;
+        if (!w || !h) {
+          rafId = requestAnimationFrame(tick);
+          return;
+        }
+        canvas.width = w;
+        canvas.height = h;
+        const ctx = canvas.getContext("2d");
+        ctx.drawImage(video, 0, 0, w, h);
+        const img = ctx.getImageData(0, 0, w, h);
+        const code = jsQR(img.data, w, h, { inversionAttempts: "dontInvert" });
+        if (code && code.data && (!last || last.raw !== code.data)) {
+          console.log("[ScanTab] QR detectado:", code.data);
+          await handleToken(code.data);
+        }
+      } catch (e) {
+        console.error("[ScanTab] tick error", e);
+      }
+      rafId = requestAnimationFrame(tick);
+    }
+    if (active) rafId = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(rafId);
+  }, [active, secret, last]);
+
+  useEffect(() => {
+    return () => stop();
+  }, []);
+
+  async function start() {
+    setErr("");
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: "environment" },
+        audio: false,
+      });
+      if (videoRef.current) videoRef.current.srcObject = stream;
+      setActive(true);
+    } catch (e) {
+      setErr("No se pudo acceder a la cámara: " + e.message);
+    }
+  }
+  function stop() {
+    const v = videoRef.current;
+    const s = v?.srcObject;
+    if (s) {
+      s.getTracks().forEach((t) => t.stop());
+      v.srcObject = null;
+    }
+    setActive(false);
+  }
+  async function handleToken(token) {
+    const res = await verifyToken(token, secret);
+    let guest = null;
+    if (res.ok) {
+      if (res.payload.eid !== event.id) {
+        persistLog({ ok: false, reason: "Evento distinto", payload: res.payload });
+        beep(false);
+        setLast({ raw: token, status: "error", reason: "Evento distinto" });
+        return;
+      }
+      guest = event.guests.find((g) => g.id === res.payload.gid) || null;
+      if (!guest) {
+        persistLog({
+          ok: false,
+          reason: "Invitado no encontrado",
+          payload: res.payload,
+        });
+        beep(false);
+        setLast({
+          raw: token,
+          status: "error",
+          reason: "Invitado no encontrado",
+        });
+        return;
+      }
+      const { jti } = res.payload || {};
+      const usedKey = `used_${event.id}`;
+      const used = new Set(
+        JSON.parse(localStorage.getItem(usedKey) || "[]")
+      );
+      if (jti && used.has(jti)) {
+        persistLog({ ok: false, reason: "QR ya usado", payload: res.payload });
+        beep(false);
+        setLast({ raw: token, status: "error", reason: "QR ya usado" });
+        return;
+      }
+      persistLog({ ok: true, guest });
+      if (jti) {
+        used.add(jti);
+        localStorage.setItem(usedKey, JSON.stringify([...used]));
+      }
+      beep(true);
+      setLast({ raw: token, status: "ok", guest });
+    } else {
+      persistLog({ ok: false, reason: res.reason });
+      beep(false);
+      setLast({ raw: token, status: "error", reason: res.reason });
+    }
+  }
+  function persistLog({ ok, guest = null, reason = null, payload = null }) {
+    const item = {
+      id: uuidv4(),
+      eventId: event.id,
+      guestId: guest?.id || payload?.gid || null,
+      guestName: guest?.name || null,
+      whenISO: nowISO(),
+      device: navigator.userAgent,
+      ok,
+      reason,
+    };
+    setLogs((prev) => [...prev, item]);
+  }
+  return (
+    <div className="mt-4 grid gap-6">
+      <div className="flex items-center gap-2 flex-wrap">
+        {!active ? (
+          <button
+            className="px-4 py-2 rounded-xl bg-gray-900 text-white"
+            onClick={start}
+          >
+            Iniciar cámara
+          </button>
+        ) : (
+          <button className="px-4 py-2 rounded-xl border" onClick={stop}>
+            Detener
+          </button>
+        )}
+        <button
+          className="px-4 py-2 rounded-xl border"
+          onClick={() => {
+            localStorage.removeItem(`used_${event.id}`);
+            alert("Reseteado el registro de QR usados para este evento.");
+          }}
+        >
+          Reset usados (evento)
+        </button>
+        {err && <div className="text-sm text-red-600">{err}</div>}
+      </div>
+      <div className="grid gap-3">
+        <video ref={videoRef} autoPlay playsInline className="w-full rounded-xl border" />
+        <canvas ref={canvasRef} className="hidden" />
+      </div>
+      <div className="flex items-center gap-2">
+        <label className="px-3 py-2 rounded-xl border cursor-pointer">
+          Leer desde imagen
+          <input
+            type="file"
+            accept="image/*"
+            className="hidden"
+            onChange={async (e) => {
+              const f = e.target.files?.[0];
+              if (!f) return;
+              const img = new Image();
+              img.onload = async () => {
+                const canvas = canvasRef.current;
+                const ctx = canvas.getContext("2d");
+                canvas.width = img.naturalWidth;
+                canvas.height = img.naturalHeight;
+                ctx.drawImage(img, 0, 0);
+                const im = ctx.getImageData(0, 0, canvas.width, canvas.height);
+                const code = jsQR(im.data, canvas.width, canvas.height, {
+                  inversionAttempts: "dontInvert",
+                });
+                if (code?.data) await handleToken(code.data);
+                else alert("No se detectó un QR válido en la imagen.");
+                e.target.value = "";
+                URL.revokeObjectURL(img.src);
+              };
+              img.src = URL.createObjectURL(f);
+            }}
+          />
+        </label>
+        <input
+          className="px-3 py-2 border rounded-xl flex-1"
+          placeholder="Pegar token QRAC1.… y Enter"
+          onKeyDown={async (e) => {
+            if (e.key === "Enter") {
+              const v = e.currentTarget.value.trim();
+              if (v) {
+                await handleToken(v);
+                e.currentTarget.value = "";
+              }
+            }
+          }}
+        />
+        <button
+          className="px-3 py-2 rounded-xl border"
+          onClick={async () => {
+            const v = prompt("Pega el token QR:");
+            if (v) await handleToken(v.trim());
+          }}
+        >
+          Validar token
+        </button>
+      </div>
+      {last && (
+        <div
+          className={`p-3 rounded-xl border ${
+            last.status === "ok"
+              ? "border-green-600 bg-green-50"
+              : "border-red-600 bg-red-50"
+          }`}
+        >
+          {last.status === "ok" ? (
+            <div>
+              <div className="font-medium">✔ Acceso permitido</div>
+              <div className="text-sm">{last.guest?.name}</div>
+            </div>
+          ) : (
+            <div>
+              <div className="font-medium">✖ Acceso denegado</div>
+              <div className="text-sm">{last.reason}</div>
+            </div>
+          )}
+        </div>
+      )}
+      <div className="text-xs text-gray-600">
+        Nota: Sin servidor no es posible bloquear re-uso del mismo QR entre
+        dispositivos. Este MVP marca usos localmente.
+      </div>
+    </div>
+  );
+}
+
+function beep(ok) {
+  try {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const o = ctx.createOscillator();
+    const g = ctx.createGain();
+    o.connect(g);
+    g.connect(ctx.destination);
+    o.type = ok ? "sine" : "square";
+    o.frequency.value = ok ? 880 : 220;
+    g.gain.value = 0.05;
+    o.start();
+    setTimeout(() => {
+      o.stop();
+      ctx.close();
+    }, ok ? 150 : 300);
+  } catch (_) {}
+}
+
+function ExportTab({ event, logs }) {
+  const eventLogs = useMemo(
+    () => logs.filter((l) => l.eventId === event.id),
+    [logs, event.id]
+  );
+  return (
+    <div className="mt-4 grid gap-4">
+      <div className="flex flex-wrap gap-2">
+        <button
+          className="px-4 py-2 rounded-xl border"
+          onClick={() => {
+            const rows = eventLogs.map((l) => ({
+              when: l.whenISO,
+              guestId: l.guestId || "",
+              guestName: l.guestName || "",
+              ok: l.ok ? "1" : "0",
+              reason: l.reason || "",
+              device: l.device,
+            }));
+            const csv = Papa.unparse(rows);
+            downloadBlob(`${slug(event.name)}_checkins.csv`, "text/csv", csv);
+          }}
+        >
+          Exportar check-ins CSV
+        </button>
+
+        <button
+          className="px-4 py-2 rounded-xl border"
+          onClick={() => {
+            const rows = event.guests.map((g) => ({
+              id: g.id,
+              name: g.name,
+              email: g.email || "",
+              role: g.role || "",
+              note: g.note || "",
+              expiresAt: g.expiresAt || "",
+            }));
+            const csv = Papa.unparse(rows);
+            downloadBlob(`${slug(event.name)}_invitados.csv`, "text/csv", csv);
+          }}
+        >
+          Exportar invitados CSV
+        </button>
+
+        <button
+          className="px-4 py-2 rounded-xl border"
+          onClick={() => {
+            const json = JSON.stringify(event, null, 2);
+            downloadBlob(`${slug(event.name)}.json`, "application/json", json);
+          }}
+        >
+          Exportar evento JSON
+        </button>
+      </div>
+      <div className="text-sm text-gray-600">Registros: {eventLogs.length}</div>
+      <div className="max-h-80 overflow-auto border rounded-xl">
+        <table className="w-full text-sm">
+          <thead className="bg-gray-50 sticky top-0">
+            <tr>
+              <th className="p-2 text-left">Fecha</th>
+              <th className="p-2 text-left">Invitado</th>
+              <th className="p-2 text-left">OK</th>
+              <th className="p-2 text-left">Motivo</th>
+              <th className="p-2 text-left">Dispositivo</th>
+            </tr>
+          </thead>
+          <tbody>
+            {eventLogs
+              .slice()
+              .reverse()
+              .map((l) => (
+                <tr key={l.id} className="border-t">
+                  <td className="p-2 whitespace-nowrap">
+                    {fmtDateTime(l.whenISO)}
+                  </td>
+                  <td className="p-2">{l.guestName || l.guestId || "-"}</td>
+                  <td className="p-2">{l.ok ? "✔" : "✖"}</td>
+                  <td className="p-2">{l.reason || ""}</td>
+                  <td className="p-2 truncate max-w-[16rem]" title={l.device}>
+                    {l.device}
+                  </td>
+                </tr>
+              ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+function PrintTab({ event, secret }) {
+  const [htmlUrl, setHtmlUrl] = useState(null);
+  useEffect(() => {
+    (async () => {
+      const cards = await Promise.all(
+        event.guests.map(async (g) => {
+          const payload = makePayload({ eventId: event.id, guest: g });
+          const token = await tokenFromPayload(payload, secret);
+          const dataUrl = await QRCode.toDataURL(token, { margin: 1, scale: 6 });
+          return `<div class="card"><img src="${dataUrl}"/><div class="name">${escapeHtml(
+            g.name
+          )}</div><div class="role">${escapeHtml(g.role || "")}</div></div>`;
+        })
+      );
+      const html = `<!doctype html><html><head><meta charset="utf-8"/><title>${escapeHtml(
+        event.name
+      )} — Credenciales</title>
+      <style>
+        @page { size: A4; margin: 12mm; }
+        body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial; }
+        .grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12mm; }
+        .card { border: 1px solid #ccc; border-radius: 10px; padding: 10mm; text-align: center; }
+        .card img { width: 220px; height: 220px; object-fit: contain; }
+        .name { font-size: 18px; font-weight: 700; margin-top: 6mm; }
+        .role { font-size: 12px; color: #555; }
+      </style></head>
+      <body>
+        <h1>${escapeHtml(event.name)}</h1>
+        <div class="grid">${cards.join("\n")}</div>
+        <script>window.print()</script>
+      </body></html>`;
+      const blob = new Blob([html], { type: "text/html" });
+      const url = URL.createObjectURL(blob);
+      setHtmlUrl(url);
+    })();
+  }, [event, secret]);
+
+  return (
+    <div className="mt-4 space-y-2">
+      <p className="text-sm text-gray-600">
+        Genera una hoja imprimible con QR por invitado.
+      </p>
+      <div>
+        <a
+          href={htmlUrl || "#"}
+          target="_blank"
+          rel="noreferrer"
+          className={`px-4 py-2 rounded-xl border ${
+            htmlUrl ? "" : "pointer-events-none opacity-50"
+          }`}
+        >
+          Abrir vista de impresión
+        </a>
+      </div>
+    </div>
+  );
+}
+
+function slug(s) {
+  return s
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/(^-|-$)/g, "");
+}
+function escapeHtml(s) {
+  return s.replace(/[&<>\"']/g, (c) => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    '"': "&quot;",
+    "'": "&#39;",
+  })[c]);
+}
+
+function generateSecret() {
+  const bytes = new Uint8Array(32);
+  crypto.getRandomValues(bytes);
+  console.log("[generateSecret] new secret generated");
+  return base64url.encode(bytes);
+}
+
+// --- Self Tests (runtime, console-only) ---
+function runSelfTests() {
+  try {
+    console.group("[SelfTests]");
+    const sample = new TextEncoder().encode("hello");
+    const enc = base64url.encode(sample);
+    const dec = new Uint8Array(base64url.decode(enc));
+    console.assert(
+      new TextDecoder().decode(dec) === "hello",
+      "base64url roundtrip"
+    );
+
+    (async () => {
+      const secret = generateSecret();
+      const payload = {
+        v: 1,
+        eid: "evt",
+        gid: "guest",
+        jti: crypto.randomUUID(),
+        iat: new Date().toISOString(),
+      };
+      const tok = await tokenFromPayload(payload, secret);
+      const ok = await verifyToken(tok, secret);
+      console.assert(ok.ok && ok.payload.gid === "guest", "verify valid token");
+      const bad = await verifyToken(tok, generateSecret());
+      console.assert(!bad.ok, "reject token with different secret");
+      console.groupEnd();
+    })();
+  } catch (e) {
+    console.error("[SelfTests] failed", e);
+  }
+}
