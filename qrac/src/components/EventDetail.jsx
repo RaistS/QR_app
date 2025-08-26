@@ -18,23 +18,37 @@ import {
 
 const SCAN_INTERVAL_MS = 100;
 
-export default function EventDetail({ event, events, setEvents, secret, logs, setLogs }) {
+export default function EventDetail({ event, setEvents, secret, logs, setLogs }) {
   const [tab, setTab] = useState("guests");
-  const idx = events.findIndex((e) => e.id === event.id);
 
+  /**
+   * Updates the current event inside the global events array. The updater can be
+   * either a plain object with the patch or a function that receives the latest
+   * event and returns the patch. Using a functional update ensures we always
+   * operate on the most recent state when multiple updates are queued (e.g.
+   * importing many guests from a CSV).
+   */
   const updateEvent = (patch) => {
-    const next = [...events];
-    next[idx] = { ...event, ...patch };
-    setEvents(next);
+    setEvents((prev) => {
+      const idx = prev.findIndex((e) => e.id === event.id);
+      if (idx === -1) return prev;
+      const current = prev[idx];
+      const next = [...prev];
+      const resolvedPatch =
+        typeof patch === "function" ? patch(current) : patch;
+      next[idx] = { ...current, ...resolvedPatch };
+      return next;
+    });
   };
 
-  const addGuest = (g) => updateEvent({ guests: [...event.guests, g] });
+  const addGuest = (g) =>
+    updateEvent((ev) => ({ guests: [...ev.guests, g] }));
   const removeGuest = (gid) =>
-    updateEvent({ guests: event.guests.filter((g) => g.id !== gid) });
+    updateEvent((ev) => ({ guests: ev.guests.filter((g) => g.id !== gid) }));
   const updateGuest = (gid, patch) =>
-    updateEvent({
-      guests: event.guests.map((g) => (g.id === gid ? { ...g, ...patch } : g)),
-    });
+    updateEvent((ev) => ({
+      guests: ev.guests.map((g) => (g.id === gid ? { ...g, ...patch } : g)),
+    }));
 
   return (
     <div className="bg-white rounded-2xl shadow p-4">

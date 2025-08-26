@@ -88,7 +88,6 @@ export default function App() {
           {selectedEvent ? (
             <EventDetail
               event={selectedEvent}
-              events={events}
               setEvents={setEvents}
               secret={secret}
               logs={logs}
