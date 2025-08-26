@@ -948,6 +948,7 @@ function ScanTab({ event, secret, logs, setLogs }) {
     const s = v?.srcObject;
     if (s) {
       s.getTracks().forEach((t) => t.stop());
+      v.pause();
       v.srcObject = null;
     }
     setActive(false);
@@ -1041,7 +1042,14 @@ function ScanTab({ event, secret, logs, setLogs }) {
         {err && <div className="text-sm text-red-600">{err}</div>}
       </div>
       <div className="grid gap-3">
-        <video ref={videoRef} autoPlay playsInline className="w-full rounded-xl border" />
+        {active && (
+          <video
+            ref={videoRef}
+            autoPlay
+            playsInline
+            className="w-full rounded-xl border"
+          />
+        )}
         <canvas ref={canvasRef} className="hidden" />
       </div>
       <div className="flex items-center gap-2">
