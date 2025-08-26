@@ -269,7 +269,12 @@ function GuestListTab({ event, removeGuest, updateGuest, secret }) {
       const body = encodeURIComponent(
         `Hola ${guest.name},\n\nAdjunto tu código QR:\n${dataUrl}\n`
       );
-      window.location.href = `mailto:${guest.email}?subject=${subject}&body=${body}`;
+      const from = encodeURIComponent(
+        "jon.echeverriasanmillan@osakidetza.eus"
+      );
+      const to = encodeURIComponent(guest.email);
+      const mailtoLink = `mailto:${to}?from=${from}&subject=${subject}&body=${body}`;
+      window.open(mailtoLink);
     } catch {
       alert("Error generando QR");
     }
