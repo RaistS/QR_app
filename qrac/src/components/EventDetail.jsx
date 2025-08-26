@@ -638,7 +638,12 @@ function ScanTab({ event, secret, setLogs }) {
         {err && <div className="text-sm text-red-600">{err}</div>}
       </div>
       <div className="grid gap-3">
-        <video ref={videoRef} autoPlay playsInline className="w-full rounded-xl border" />
+        <video
+          ref={videoRef}
+          autoPlay
+          playsInline
+          className="w-3/4 rounded-xl border mx-auto"
+        />
         <canvas ref={canvasRef} className="hidden" />
       </div>
       <div className="flex items-center gap-2">
