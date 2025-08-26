@@ -256,27 +256,39 @@ function GuestsTab({ addGuest }) {
 }
 
 function GuestListTab({ event, removeGuest, updateGuest, secret }) {
+  const [sending, setSending] = useState(false);
+  const [feedback, setFeedback] = useState(null);
+
   async function sendQrEmail(guest) {
     if (!guest.email) {
       alert("Invitado sin email");
       return;
     }
+    setSending(true);
+    setFeedback(null);
     try {
       const payload = makePayload({ eventId: event.id, guest });
       const token = await tokenFromPayload(payload, secret);
       const dataUrl = await QRCode.toDataURL(token, { margin: 1, scale: 8 });
-      const subject = encodeURIComponent(`QR para ${guest.name}`);
-      const body = encodeURIComponent(
-        `Hola ${guest.name},\n\nAdjunto tu código QR:\n${dataUrl}\n`
-      );
-      const from = encodeURIComponent(
-        "jon.echeverriasanmillan@osakidetza.eus"
-      );
-      const to = encodeURIComponent(guest.email);
-      const mailtoLink = `mailto:${to}?from=${from}&subject=${subject}&body=${body}`;
-      window.open(mailtoLink);
-    } catch {
-      alert("Error generando QR");
+
+      const res = await fetch("/api/send-qr", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          email: guest.email,
+          qrData: dataUrl,
+          subject: `QR para ${guest.name}`,
+          body: `Hola ${guest.name},\n\nAdjunto tu código QR.`,
+        }),
+      });
+
+      if (!res.ok) throw new Error("Request failed");
+      setFeedback("Correo enviado");
+    } catch (e) {
+      console.error(e);
+      setFeedback("Error enviando correo");
+    } finally {
+      setSending(false);
     }
   }
 
@@ -287,12 +299,20 @@ function GuestListTab({ event, removeGuest, updateGuest, secret }) {
         {event.guests.length > 0 && (
           <button
             className="px-3 py-1.5 rounded-xl border text-sm"
-            onClick={() => event.guests.forEach((g) => sendQrEmail(g))}
+            disabled={sending}
+            onClick={async () => {
+              for (const g of event.guests) {
+                await sendQrEmail(g);
+              }
+            }}
           >
-            Enviar todos
+            {sending ? "Enviando..." : "Enviar todos"}
           </button>
         )}
       </div>
+      {feedback && (
+        <div className="mb-2 text-sm">{feedback}</div>
+      )}
       <ul className="max-h-[28rem] overflow-auto pr-1 space-y-2">
         {event.guests.map((g) => (
           <li
@@ -314,9 +334,10 @@ function GuestListTab({ event, removeGuest, updateGuest, secret }) {
               <div className="flex items-center gap-2">
                 <button
                   className="px-3 py-1.5 text-sm rounded-xl border"
+                  disabled={sending}
                   onClick={() => sendQrEmail(g)}
                 >
-                  Enviar QR
+                  {sending ? "Enviando..." : "Enviar QR"}
                 </button>
                 <QRButton eventId={event.id} guest={g} secret={secret} />
                 <button
