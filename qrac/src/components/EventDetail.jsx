@@ -1,446 +1,24 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useRef, useState, useMemo } from "react";
 import QRCode from "qrcode";
 import jsQR from "jsqr";
 import Papa from "papaparse";
 import { v4 as uuidv4 } from "uuid";
+import {
+  fmtDateTime,
+  downloadBlob,
+  copyToClipboard,
+  nowISO,
+  makePayload,
+  tokenFromPayload,
+  verifyToken,
+  slug,
+  escapeHtml,
+  beep,
+} from "../utils";
 
-const STORAGE_KEYS = {
-  events: "qrac_events_v1",
-  logs: "qrac_logs_v1",
-  secret: "qrac_secret_v1",
-};
+const SCAN_INTERVAL_MS = 100;
 
-const base64url = {
-  encode: (buf) =>
-    btoa(String.fromCharCode(...new Uint8Array(buf)))
-      .replace(/\+/g, "-")
-      .replace(/\//g, "_")
-      .replace(/=+$/g, ""),
-  decode: (str) => {
-    const pad = str.length % 4 === 0 ? 0 : 4 - (str.length % 4);
-    const s = str.replace(/-/g, "+").replace(/_/g, "/") + "=".repeat(pad);
-    const bin = atob(s);
-    const bytes = new Uint8Array(bin.length);
-    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-    return bytes.buffer;
-  },
-};
-
-async function hmacImportKey(secret) {
-  console.log("[hmacImportKey] importing key");
-  let raw;
-  try {
-    if (/^[A-Za-z0-9_-]{43,}$/.test(secret)) raw = base64url.decode(secret);
-  } catch (_) {}
-  if (!raw) raw = new TextEncoder().encode(secret);
-  return crypto.subtle.importKey(
-    "raw",
-    raw,
-    { name: "HMAC", hash: { name: "SHA-256" } },
-    false,
-    ["sign", "verify"]
-  );
-}
-
-async function hmacSign(secret, data) {
-  console.log("[hmacSign] data", new TextDecoder().decode(data));
-  const key = await hmacImportKey(secret);
-  const sig = await crypto.subtle.sign("HMAC", key, data);
-  console.log("[hmacSign] signature length", sig.byteLength);
-  return new Uint8Array(sig);
-}
-
-async function hmacVerify(secret, data, signature) {
-  console.log("[hmacVerify] verifying signature");
-  const key = await hmacImportKey(secret);
-  const result = await crypto.subtle.verify("HMAC", key, signature, data);
-  console.log("[hmacVerify] result", result);
-  return result;
-}
-
-function downloadBlob(filename, mime, content) {
-  console.log("[downloadBlob] filename", filename, "mime", mime);
-  const blob = new Blob([content], { type: mime });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  URL.revokeObjectURL(url);
-}
-
-function nowISO() {
-  return new Date().toISOString();
-}
-
-function fmtDateTime(d) {
-  const date = typeof d === "string" ? new Date(d) : d;
-  return new Intl.DateTimeFormat(undefined, {
-    dateStyle: "medium",
-    timeStyle: "short",
-  }).format(date);
-}
-
-function useLocalStorage(key, initial) {
-  console.log("[useLocalStorage] init", key);
-  const [state, setState] = useState(() => {
-    try {
-      const raw = localStorage.getItem(key);
-      return raw ? JSON.parse(raw) : initial;
-    } catch (e) {
-      return initial;
-    }
-  });
-  useEffect(() => {
-    try {
-      localStorage.setItem(key, JSON.stringify(state));
-      console.log("[useLocalStorage] updated", key, state);
-    } catch (e) {
-      console.error("[useLocalStorage] error saving", e);
-    }
-  }, [key, state]);
-  return [state, setState];
-}
-
-async function copyToClipboard(text) {
-  console.log("[copyToClipboard] text", text);
-  try {
-    if (navigator.clipboard && window.isSecureContext) {
-      await navigator.clipboard.writeText(text);
-      console.log("[copyToClipboard] success via clipboard API");
-      return true;
-    }
-  } catch (e) {
-    console.warn("[copyToClipboard] clipboard API failed", e);
-  }
-  try {
-    const ta = document.createElement("textarea");
-    ta.value = text;
-    ta.setAttribute("readonly", "");
-    ta.style.position = "fixed";
-    ta.style.top = "-1000px";
-    document.body.appendChild(ta);
-    ta.select();
-    ta.setSelectionRange(0, ta.value.length);
-    const ok = document.execCommand("copy");
-    document.body.removeChild(ta);
-    if (ok) {
-      console.log("[copyToClipboard] success via execCommand");
-      return true;
-    }
-  } catch (e) {
-    console.warn("[copyToClipboard] execCommand failed", e);
-  }
-  try {
-    window.prompt("Copia el contenido y pulsa Aceptar", text);
-    console.log("[copyToClipboard] fallback prompt used");
-  } catch (e) {
-    console.error("[copyToClipboard] all methods failed", e);
-  }
-  return false;
-}
-
-export default function App() {
-  console.log("[App] render");
-  const [events, setEvents] = useLocalStorage(STORAGE_KEYS.events, []);
-  const [logs, setLogs] = useLocalStorage(STORAGE_KEYS.logs, []);
-  const [secret, setSecret] = useLocalStorage(
-    STORAGE_KEYS.secret,
-    generateSecret()
-  );
-  const [selectedEventId, setSelectedEventId] = useState(null);
-  const selectedEvent = useMemo(
-    () => events.find((e) => e.id === selectedEventId) || null,
-    [events, selectedEventId]
-  );
-
-  // ⛔ No registrar Service Worker en desarrollo (evita pantalla en blanco/cachés raras)
-  useEffect(() => {
-    if (!("serviceWorker" in navigator) || !import.meta.env.PROD) return;
-
-    console.log("[App] service worker setup (prod)");
-    const swCode = `self.addEventListener('install', e=>{self.skipWaiting()});self.addEventListener('activate', e=>{self.clients.claim()});self.addEventListener('fetch', e=>{e.respondWith((async()=>{try{return await fetch(e.request)}catch(_){return caches.match('shell')||new Response('<!doctype html><title>Offline</title><h1>Estás offline</h1>',{headers:{'Content-Type':'text/html'}})}})())});`;
-    const shell = document.documentElement.outerHTML;
-    (async () => {
-      try {
-        const swBlob = new Blob([swCode], { type: "text/javascript" });
-        const swUrl = URL.createObjectURL(swBlob);
-        const reg = await navigator.serviceWorker.register(swUrl);
-        console.log("[SW] registered", reg);
-        const c = await caches.open("qrac-shell");
-        await c.put(
-          "shell",
-          new Response(shell, { headers: { "Content-Type": "text/html" } })
-        );
-        setTimeout(() => URL.revokeObjectURL(swUrl), 5000);
-      } catch (e) {
-        console.warn("[SW error]", e);
-      }
-    })();
-  }, []);
-
-  useEffect(() => {
-    // Tests ligeros en consola
-    runSelfTests();
-  }, []);
-
-  return (
-
-    <div className="min-h-screen bg-slate-50 text-slate-900">
-      <header className="sticky top-0 z-10 bg-gradient-to-r from-indigo-600 to-violet-600 text-white shadow">
-        <div className="max-w-6xl mx-auto px-4 py-3 flex items-center justify-between">
-          <h1 className="text-2xl font-semibold tracking-tight">
-            QR Access Control — MVP
-          </h1>
-          <SecretManager secret={secret} setSecret={setSecret} />
-        </div>
-      </header>
-
-      <main className="max-w-6xl mx-auto px-4 py-6 grid gap-6 lg:grid-cols-3">
-        <section className="lg:col-span-1">
-          <EventList
-            events={events}
-            onSelect={setSelectedEventId}
-            selectedId={selectedEventId}
-            onCreate={(evt) => setEvents((p) => [...p, evt])}
-            onDelete={(id) => {
-              setEvents((p) => p.filter((e) => e.id !== id));
-              localStorage.removeItem(`used_${id}`);
-              if (selectedEventId === id) setSelectedEventId(null);
-            }}
-            onExport={() =>
-              downloadBlob(
-                `qrac_backup_${new Date().toISOString().slice(0, 10)}.json`,
-                "application/json",
-                JSON.stringify({ events, logs, secret }, null, 2)
-              )
-            }
-            onImport={(data) => {
-              try {
-                const obj = JSON.parse(data);
-                if (obj.events) setEvents(obj.events);
-                if (obj.logs) setLogs(obj.logs);
-                if (obj.secret) setSecret(obj.secret);
-                alert("Datos importados correctamente");
-              } catch (e) {
-                alert("Archivo no válido");
-              }
-            }}
-          />
-        </section>
-
-        <section className="lg:col-span-2">
-          {selectedEvent ? (
-            <EventDetail
-              event={selectedEvent}
-              events={events}
-              setEvents={setEvents}
-              secret={secret}
-              logs={logs}
-              setLogs={setLogs}
-            />
-          ) : (
-            <EmptyState />
-          )}
-        </section>
-      </main>
-
-      <footer className="border-t bg-white/60">
-        <div className="max-w-6xl mx-auto px-4 py-3 text-sm text-gray-600 flex flex-wrap gap-4 items-center justify-between">
-          <p>
-            Todos los datos se guardan en tu navegador (localStorage). Puedes
-            exportar/importar un backup JSON.
-          </p>
-          <p>
-            Consejo: comparte el <span className="font-semibold">Secreto de firma</span> con
-            otros dispositivos para validar los mismos QR.
-          </p>
-        </div>
-      </footer>
-    </div>
-  );
-}
-
-function EmptyState() {
-  return (
-    <div className="h-full w-full flex items-center justify-center">
-      <div className="text-center max-w-md">
-        <h2 className="text-lg font-medium">
-          Crea un evento o selecciona uno existente
-        </h2>
-        <p className="text-sm text-gray-600 mt-2">
-          Gestiona invitados, genera credenciales con QR firmados, escanea y
-          registra check-ins. Funciona offline.
-        </p>
-      </div>
-    </div>
-  );
-}
-
-function SecretManager({ secret, setSecret }) {
-  const [visible, setVisible] = useState(false);
-  const weak = typeof secret === "string" && secret.length < 32;
-  return (
-    <div className="flex items-center gap-2">
-      <button
-        className="px-3 py-1.5 rounded-xl bg-gray-900 text-white text-sm shadow"
-        onClick={() => setSecret(generateSecret())}
-        title="Generar un nuevo secreto aleatorio (rotación)"
-      >
-        Rotar secreto
-      </button>
-      <button
-        className="px-3 py-1.5 rounded-xl bg-gray-100 text-sm border"
-        onClick={async () => {
-          const ok = await copyToClipboard(secret);
-          alert(
-            ok
-              ? "Secreto copiado"
-              : "No se pudo copiar automáticamente. Se mostró el texto para que lo copies manualmente."
-          );
-        }}
-      >
-        Copiar secreto
-      </button>
-      <button
-        className="px-2 py-1 rounded-lg text-sm border"
-        onClick={() => setVisible((v) => !v)}
-      >
-        {visible ? "Ocultar" : "Ver"}
-      </button>
-      <input
-        className={`ml-2 w-64 px-2 py-1 text-sm border rounded-lg bg-white ${
-          weak ? "border-red-400" : ""
-        }`}
-        value={visible ? secret : "•".repeat(12)}
-        onChange={(e) => setSecret(e.target.value)}
-        title="Secreto de firma HMAC (compártelo para validar en otros dispositivos)"
-      />
-    </div>
-  );
-}
-
-function EventList({
-  events,
-  onSelect,
-  selectedId,
-  onCreate,
-  onDelete,
-  onExport,
-  onImport,
-}) {
-  const [name, setName] = useState("");
-  const [date, setDate] = useState("");
-  const [location, setLocation] = useState("");
-
-  return (
-    <div className="bg-white rounded-2xl shadow p-4 sticky top-20">
-      <h2 className="text-lg font-semibold mb-3">Eventos</h2>
-
-      <ul className="space-y-1 mb-4 max-h-72 overflow-auto pr-1">
-        {events.map((e) => (
-          <li
-            key={e.id}
-            className={`flex items-center justify-between gap-2 p-2 rounded-xl border ${
-              selectedId === e.id ? "bg-gray-100 border-gray-400" : "bg-white"
-            }`}
-          >
-            <button
-              onClick={() => onSelect(e.id)}
-              className="flex-1 text-left"
-              title="Seleccionar"
-            >
-              <div className="font-medium">{e.name}</div>
-              <div className="text-xs text-gray-500">
-                {e.date ? fmtDateTime(e.date) : "Sin fecha"} —{" "}
-                {e.location || "Sin ubicación"}
-              </div>
-            </button>
-            <button
-              className="text-xs text-red-600 hover:underline"
-              onClick={() => {
-                if (confirm("¿Eliminar evento y sus invitados?")) onDelete(e.id);
-              }}
-            >
-              Eliminar
-            </button>
-          </li>
-        ))}
-        {!events.length && (
-          <li className="text-sm text-gray-500">Aún no hay eventos.</li>
-        )}
-      </ul>
-
-      <div className="border-t pt-3 space-y-2">
-        <h3 className="text-sm font-medium">Crear evento</h3>
-        <input
-          className="w-full px-3 py-2 border rounded-xl"
-          placeholder="Nombre del evento"
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-        />
-        <input
-          className="w-full px-3 py-2 border rounded-xl"
-          type="datetime-local"
-          value={date}
-          onChange={(e) => setDate(e.target.value)}
-        />
-        <input
-          className="w-full px-3 py-2 border rounded-xl"
-          placeholder="Ubicación"
-          value={location}
-          onChange={(e) => setLocation(e.target.value)}
-        />
-        <button
-          className="w-full py-2 rounded-xl bg-gray-900 text-white"
-          onClick={() => {
-            if (!name.trim()) return alert("El nombre es obligatorio");
-            onCreate({
-              id: uuidv4(),
-              name: name.trim(),
-              date,
-              location,
-              guests: [],
-            });
-            setName("");
-            setDate("");
-            setLocation("");
-          }}
-        >
-          Crear
-        </button>
-      </div>
-
-      <div className="border-t mt-4 pt-3 space-y-2">
-        <h3 className="text-sm font-medium">Backup</h3>
-        <div className="flex gap-2">
-          <button className="flex-1 py-2 rounded-xl border" onClick={onExport}>
-            Exportar JSON
-          </button>
-          <label className="flex-1 py-2 rounded-xl border text-center cursor-pointer">
-            Importar JSON
-            <input
-              type="file"
-              accept="application/json"
-              className="hidden"
-              onChange={async (e) => {
-                const f = e.target.files?.[0];
-                if (!f) return;
-                const text = await f.text();
-                onImport(text);
-                e.target.value = "";
-              }}
-            />
-          </label>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function EventDetail({ event, events, setEvents, secret, logs, setLogs }) {
+export default function EventDetail({ event, events, setEvents, secret, logs, setLogs }) {
   const [tab, setTab] = useState("guests");
   const idx = events.findIndex((e) => e.id === event.id);
 
@@ -514,7 +92,7 @@ function EventDetail({ event, events, setEvents, secret, logs, setLogs }) {
         />
       )}
       {tab === "scan" && (
-        <ScanTab event={event} secret={secret} logs={logs} setLogs={setLogs} />
+        <ScanTab event={event} secret={secret} setLogs={setLogs} />
       )}
       {tab === "export" && <ExportTab event={event} logs={logs} />}
       {tab === "print" && <PrintTab event={event} secret={secret} />}
@@ -724,43 +302,6 @@ function GuestsTab({ event, addGuest, removeGuest, updateGuest, secret }) {
   );
 }
 
-function makePayload({ eventId, guest, version = 1 }) {
-  const payload = {
-    v: version,
-    eid: eventId,
-    gid: guest.id,
-    jti: crypto.randomUUID(),
-    iat: new Date().toISOString(),
-  };
-  if (guest.expiresAt) payload.exp = new Date(guest.expiresAt).toISOString();
-  return payload;
-}
-
-async function tokenFromPayload(payload, secret) {
-  const json = new TextEncoder().encode(JSON.stringify(payload));
-  const sig = await hmacSign(secret, json);
-  const t = base64url.encode(json) + "." + base64url.encode(sig);
-  return "QRAC1." + t; // prefijo para identificar
-}
-
-async function verifyToken(token, secret) {
-  if (!token.startsWith("QRAC1."))
-    return { ok: false, reason: "Formato inválido" };
-  const body = token.slice("QRAC1.".length);
-  const [payloadB64, sigB64] = body.split(".");
-  if (!payloadB64 || !sigB64)
-    return { ok: false, reason: "Token incompleto" };
-  const jsonBuf = base64url.decode(payloadB64);
-  const sigBuf = base64url.decode(sigB64);
-  const ok = await hmacVerify(secret, jsonBuf, sigBuf);
-  if (!ok) return { ok: false, reason: "Firma no válida" };
-  const payload = JSON.parse(new TextDecoder().decode(jsonBuf));
-  if (payload.exp && new Date(payload.exp) < new Date()) {
-    return { ok: false, reason: "QR caducado", payload };
-  }
-  return { ok: true, payload };
-}
-
 function QRButton({ eventId, guest, secret }) {
   const [open, setOpen] = useState(false);
   return (
@@ -870,7 +411,7 @@ function QRCard({ eventId, guest, secret }) {
   );
 }
 
-function ScanTab({ event, secret, logs, setLogs }) {
+function ScanTab({ event, secret, setLogs }) {
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
   const [active, setActive] = useState(false);
@@ -882,7 +423,7 @@ function ScanTab({ event, secret, logs, setLogs }) {
     let rafId;
     async function tick(ts) {
       try {
-        if (ts - lastTickRef.current < 250) {
+        if (ts - lastTickRef.current < SCAN_INTERVAL_MS) {
           rafId = requestAnimationFrame(tick);
           return;
         }
@@ -901,7 +442,8 @@ function ScanTab({ event, secret, logs, setLogs }) {
         }
         canvas.width = w;
         canvas.height = h;
-        const ctx = canvas.getContext("2d");
+        const ctx = canvas.getContext("2d", { willReadFrequently: true });
+        ctx.imageSmoothingEnabled = false;
         ctx.drawImage(video, 0, 0, w, h);
         const img = ctx.getImageData(0, 0, w, h);
         const code = jsQR(img.data, w, h, { inversionAttempts: "dontInvert" });
@@ -926,7 +468,11 @@ function ScanTab({ event, secret, logs, setLogs }) {
     setErr("");
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: "environment" },
+        video: {
+          facingMode: { ideal: "environment" },
+          width: { ideal: 1280 },
+          height: { ideal: 720 },
+        },
         audio: false,
       });
       if (videoRef.current) videoRef.current.srcObject = stream;
@@ -1118,24 +664,6 @@ function ScanTab({ event, secret, logs, setLogs }) {
   );
 }
 
-function beep(ok) {
-  try {
-    const ctx = new (window.AudioContext || window.webkitAudioContext)();
-    const o = ctx.createOscillator();
-    const g = ctx.createGain();
-    o.connect(g);
-    g.connect(ctx.destination);
-    o.type = ok ? "sine" : "square";
-    o.frequency.value = ok ? 880 : 220;
-    g.gain.value = 0.05;
-    o.start();
-    setTimeout(() => {
-      o.stop();
-      ctx.close();
-    }, ok ? 150 : 300);
-  } catch (_) {}
-}
-
 function ExportTab({ event, logs }) {
   const eventLogs = useMemo(
     () => logs.filter((l) => l.eventId === event.id),
@@ -1284,60 +812,3 @@ function PrintTab({ event, secret }) {
   );
 }
 
-function slug(s) {
-  return s
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/(^-|-$)/g, "");
-}
-function escapeHtml(s) {
-  return s.replace(/[&<>\"']/g, (c) => ({
-    "&": "&amp;",
-    "<": "&lt;",
-    ">": "&gt;",
-    '"': "&quot;",
-    "'": "&#39;",
-  })[c]);
-}
-
-function generateSecret() {
-  const bytes = new Uint8Array(32);
-  crypto.getRandomValues(bytes);
-  console.log("[generateSecret] new secret generated");
-  return base64url.encode(bytes);
-}
-
-// --- Self Tests (runtime, console-only) ---
-function runSelfTests() {
-  try {
-    console.group("[SelfTests]");
-    const sample = new TextEncoder().encode("hello");
-    const enc = base64url.encode(sample);
-    const dec = new Uint8Array(base64url.decode(enc));
-    console.assert(
-      new TextDecoder().decode(dec) === "hello",
-      "base64url roundtrip"
-    );
-
-    (async () => {
-      const secret = generateSecret();
-      const payload = {
-        v: 1,
-        eid: "evt",
-        gid: "guest",
-        jti: crypto.randomUUID(),
-        iat: new Date().toISOString(),
-      };
-      const tok = await tokenFromPayload(payload, secret);
-      const ok = await verifyToken(tok, secret);
-      console.assert(ok.ok && ok.payload.gid === "guest", "verify valid token");
-      const bad = await verifyToken(tok, generateSecret());
-      console.assert(!bad.ok, "reject token with different secret");
-      console.groupEnd();
-    })();
-  } catch (e) {
-    console.error("[SelfTests] failed", e);
-  }
-}
