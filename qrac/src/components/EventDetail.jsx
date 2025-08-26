@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useRef, useState, useMemo } from "react";
 import QRCode from "qrcode";
 import jsQR from "jsqr";
 import Papa from "papaparse";
@@ -15,6 +15,8 @@ import {
   escapeHtml,
   beep,
 } from "../utils";
+
+const SCAN_INTERVAL_MS = 100;
 
 export default function EventDetail({ event, events, setEvents, secret, logs, setLogs }) {
   const [tab, setTab] = useState("guests");
@@ -90,7 +92,7 @@ export default function EventDetail({ event, events, setEvents, secret, logs, se
         />
       )}
       {tab === "scan" && (
-        <ScanTab event={event} secret={secret} logs={logs} setLogs={setLogs} />
+        <ScanTab event={event} secret={secret} setLogs={setLogs} />
       )}
       {tab === "export" && <ExportTab event={event} logs={logs} />}
       {tab === "print" && <PrintTab event={event} secret={secret} />}
@@ -409,7 +411,7 @@ function QRCard({ eventId, guest, secret }) {
   );
 }
 
-function ScanTab({ event, secret, logs, setLogs }) {
+function ScanTab({ event, secret, setLogs }) {
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
   const [active, setActive] = useState(false);
@@ -421,7 +423,7 @@ function ScanTab({ event, secret, logs, setLogs }) {
     let rafId;
     async function tick(ts) {
       try {
-        if (ts - lastTickRef.current < 250) {
+        if (ts - lastTickRef.current < SCAN_INTERVAL_MS) {
           rafId = requestAnimationFrame(tick);
           return;
         }
@@ -440,7 +442,8 @@ function ScanTab({ event, secret, logs, setLogs }) {
         }
         canvas.width = w;
         canvas.height = h;
-        const ctx = canvas.getContext("2d");
+        const ctx = canvas.getContext("2d", { willReadFrequently: true });
+        ctx.imageSmoothingEnabled = false;
         ctx.drawImage(video, 0, 0, w, h);
         const img = ctx.getImageData(0, 0, w, h);
         const code = jsQR(img.data, w, h, { inversionAttempts: "dontInvert" });
@@ -465,7 +468,11 @@ function ScanTab({ event, secret, logs, setLogs }) {
     setErr("");
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: "environment" },
+        video: {
+          facingMode: { ideal: "environment" },
+          width: { ideal: 1280 },
+          height: { ideal: 720 },
+        },
         audio: false,
       });
       if (videoRef.current) videoRef.current.srcObject = stream;
