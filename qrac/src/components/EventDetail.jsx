@@ -242,30 +242,22 @@ function GuestsTab({ addGuest }) {
 }
 
 function GuestListTab({ event, removeGuest, updateGuest, secret }) {
-  async function openQrPage(guest) {
-    const win = window.open("", "_blank");
-    if (!win) return;
-    win.document.write("Generando QR...");
+  async function sendQrEmail(guest) {
+    if (!guest.email) {
+      alert("Invitado sin email");
+      return;
+    }
     try {
       const payload = makePayload({ eventId: event.id, guest });
       const token = await tokenFromPayload(payload, secret);
       const dataUrl = await QRCode.toDataURL(token, { margin: 1, scale: 8 });
-      const html = `<!doctype html><html><head><meta charset="utf-8"/><title>${escapeHtml(
-        guest.name
-      )}</title></head><body style="display:flex;flex-direction:column;align-items:center;font-family:system-ui;margin:20px"><h1>${escapeHtml(
-        guest.name
-      )}</h1>${
-        guest.role
-          ? `<div style="margin-bottom:10px;color:#555">${escapeHtml(
-              guest.role
-            )}</div>`
-          : ""
-      }<img src="${dataUrl}" style="width:256px;height:256px"/></body></html>`;
-      win.document.open();
-      win.document.write(html);
-      win.document.close();
+      const subject = encodeURIComponent(`QR para ${guest.name}`);
+      const body = encodeURIComponent(
+        `Hola ${guest.name},\n\nAdjunto tu código QR:\n${dataUrl}\n`
+      );
+      window.location.href = `mailto:${guest.email}?subject=${subject}&body=${body}`;
     } catch {
-      win.document.body.textContent = "Error generando QR";
+      alert("Error generando QR");
     }
   }
 
@@ -276,7 +268,7 @@ function GuestListTab({ event, removeGuest, updateGuest, secret }) {
         {event.guests.length > 0 && (
           <button
             className="px-3 py-1.5 rounded-xl border text-sm"
-            onClick={() => event.guests.forEach((g) => openQrPage(g))}
+            onClick={() => event.guests.forEach((g) => sendQrEmail(g))}
           >
             Enviar todos
           </button>
@@ -303,7 +295,7 @@ function GuestListTab({ event, removeGuest, updateGuest, secret }) {
               <div className="flex items-center gap-2">
                 <button
                   className="px-3 py-1.5 text-sm rounded-xl border"
-                  onClick={() => openQrPage(g)}
+                  onClick={() => sendQrEmail(g)}
                 >
                   Enviar QR
                 </button>
