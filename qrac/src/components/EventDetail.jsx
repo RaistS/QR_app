@@ -53,7 +53,15 @@ export default function EventDetail({ event, events, setEvents, secret, logs, se
             }`}
             onClick={() => setTab("guests")}
           >
-            Invitados
+            Gestión
+          </button>
+          <button
+            className={`px-3 py-1.5 rounded-xl border ${
+              tab === "list" ? "bg-gray-900 text-white" : "bg-white"
+            }`}
+            onClick={() => setTab("list")}
+          >
+            Listado
           </button>
           <button
             className={`px-3 py-1.5 rounded-xl border ${
@@ -82,10 +90,10 @@ export default function EventDetail({ event, events, setEvents, secret, logs, se
         </div>
       </div>
 
-      {tab === "guests" && (
-        <GuestsTab
+      {tab === "guests" && <GuestsTab addGuest={addGuest} />}
+      {tab === "list" && (
+        <GuestListTab
           event={event}
-          addGuest={addGuest}
           removeGuest={removeGuest}
           updateGuest={updateGuest}
           secret={secret}
@@ -100,7 +108,7 @@ export default function EventDetail({ event, events, setEvents, secret, logs, se
   );
 }
 
-function GuestsTab({ event, addGuest, removeGuest, updateGuest, secret }) {
+function GuestsTab({ addGuest }) {
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [role, setRole] = useState("");
@@ -108,7 +116,7 @@ function GuestsTab({ event, addGuest, removeGuest, updateGuest, secret }) {
   const [expiresAt, setExpiresAt] = useState("");
 
   return (
-    <div className="mt-4 grid gap-6 lg:grid-cols-[1fr_2fr]">
+    <div className="mt-4 grid gap-6 lg:grid-cols-1">
       <div>
         <h3 className="font-medium mb-2">Alta manual</h3>
         <div className="space-y-2">
@@ -229,75 +237,120 @@ function GuestsTab({ event, addGuest, removeGuest, updateGuest, secret }) {
           </div>
         </div>
       </div>
+    </div>
+  );
+}
 
-      <div>
-        <h3 className="font-medium mb-2">
-          Invitados ({event.guests.length})
-        </h3>
-        <ul className="max-h-[28rem] overflow-auto pr-1 space-y-2">
-          {event.guests.map((g) => (
-            <li
-              key={g.id}
-              className="p-3 rounded-xl border bg-white flex flex-col gap-2"
-            >
-              <div className="flex items-center justify-between gap-3">
-                <div>
-                  <div className="font-medium">
-                    {g.name}{" "}
-                    {g.role && (
-                      <span className="text-xs text-gray-500">— {g.role}</span>
-                    )}
-                  </div>
-                  {g.email && (
-                    <div className="text-xs text-gray-500">{g.email}</div>
+function GuestListTab({ event, removeGuest, updateGuest, secret }) {
+  async function openQrPage(guest) {
+    const win = window.open("", "_blank");
+    if (!win) return;
+    win.document.write("Generando QR...");
+    try {
+      const payload = makePayload({ eventId: event.id, guest });
+      const token = await tokenFromPayload(payload, secret);
+      const dataUrl = await QRCode.toDataURL(token, { margin: 1, scale: 8 });
+      const html = `<!doctype html><html><head><meta charset="utf-8"/><title>${escapeHtml(
+        guest.name
+      )}</title></head><body style="display:flex;flex-direction:column;align-items:center;font-family:system-ui;margin:20px"><h1>${escapeHtml(
+        guest.name
+      )}</h1>${
+        guest.role
+          ? `<div style="margin-bottom:10px;color:#555">${escapeHtml(
+              guest.role
+            )}</div>`
+          : ""
+      }<img src="${dataUrl}" style="width:256px;height:256px"/></body></html>`;
+      win.document.open();
+      win.document.write(html);
+      win.document.close();
+    } catch {
+      win.document.body.textContent = "Error generando QR";
+    }
+  }
+
+  return (
+    <div className="mt-4">
+      <div className="flex items-center justify-between mb-2">
+        <h3 className="font-medium">Invitados ({event.guests.length})</h3>
+        {event.guests.length > 0 && (
+          <button
+            className="px-3 py-1.5 rounded-xl border text-sm"
+            onClick={() => event.guests.forEach((g) => openQrPage(g))}
+          >
+            Enviar todos
+          </button>
+        )}
+      </div>
+      <ul className="max-h-[28rem] overflow-auto pr-1 space-y-2">
+        {event.guests.map((g) => (
+          <li
+            key={g.id}
+            className="p-3 rounded-xl border bg-white flex flex-col gap-2"
+          >
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <div className="font-medium">
+                  {g.name}{" "}
+                  {g.role && (
+                    <span className="text-xs text-gray-500">— {g.role}</span>
                   )}
                 </div>
-                <div className="flex items-center gap-2">
-                  <QRButton eventId={event.id} guest={g} secret={secret} />
-                  <button
-                    className="text-xs text-red-600 hover:underline"
-                    onClick={() => {
-                      if (confirm("¿Eliminar invitado?")) removeGuest(g.id);
-                    }}
-                  >
-                    Eliminar
-                  </button>
-                </div>
+                {g.email && (
+                  <div className="text-xs text-gray-500">{g.email}</div>
+                )}
               </div>
-              <div className="grid grid-cols-2 gap-2 text-sm">
-                <label className="flex items-center gap-2">
-                  Caduca:
-                  <input
-                    className="flex-1 px-2 py-1 border rounded-lg"
-                    type="datetime-local"
-                    value={g.expiresAt || ""}
-                    onChange={(e) =>
-                      updateGuest(g.id, { expiresAt: e.target.value })
-                    }
-                  />
-                </label>
-                <label className="flex items-center gap-2">
-                  Rol:
-                  <input
-                    className="flex-1 px-2 py-1 border rounded-lg"
-                    value={g.role || ""}
-                    onChange={(e) => updateGuest(g.id, { role: e.target.value })}
-                  />
-                </label>
+              <div className="flex items-center gap-2">
+                <button
+                  className="px-3 py-1.5 text-sm rounded-xl border"
+                  onClick={() => openQrPage(g)}
+                >
+                  Enviar QR
+                </button>
+                <QRButton eventId={event.id} guest={g} secret={secret} />
+                <button
+                  className="text-xs text-red-600 hover:underline"
+                  onClick={() => {
+                    if (confirm("¿Eliminar invitado?")) removeGuest(g.id);
+                  }}
+                >
+                  Eliminar
+                </button>
               </div>
-              <textarea
-                className="w-full px-2 py-1 border rounded-lg text-sm"
-                placeholder="Nota"
-                value={g.note || ""}
-                onChange={(e) => updateGuest(g.id, { note: e.target.value })}
-              />
-            </li>
-          ))}
-          {!event.guests.length && (
-            <li className="text-sm text-gray-500">Aún no hay invitados.</li>
-          )}
-        </ul>
-      </div>
+            </div>
+            <div className="grid grid-cols-2 gap-2 text-sm">
+              <label className="flex items-center gap-2">
+                Caduca:
+                <input
+                  className="flex-1 px-2 py-1 border rounded-lg"
+                  type="datetime-local"
+                  value={g.expiresAt || ""}
+                  onChange={(e) =>
+                    updateGuest(g.id, { expiresAt: e.target.value })
+                  }
+                />
+              </label>
+              <label className="flex items-center gap-2">
+                Rol:
+                <input
+                  className="flex-1 px-2 py-1 border rounded-lg"
+                  value={g.role || ""}
+                  onChange={(e) => updateGuest(g.id, { role: e.target.value })}
+                />
+              </label>
+            </div>
+            <textarea
+              className="w-full px-2 py-1 border rounded-lg text-sm"
+              placeholder="Nota"
+              value={g.note || ""}
+              onChange={(e) => updateGuest(g.id, { note: e.target.value })}
+            />
+          </li>
+        ))}
+        {!event.guests.length && (
+          <li className="text-sm text-gray-500">Aún no hay invitados.</li>
+        )}
+      </ul>
     </div>
   );
 }
