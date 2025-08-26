@@ -539,12 +539,13 @@ function ScanTab({ event, secret, setLogs }) {
     } catch (e) {
       setErr("No se pudo acceder a la cámara: " + e.message);
     }
-  }
+  } 
   function stop() {
     const v = videoRef.current;
     const s = v?.srcObject;
     if (s) {
       s.getTracks().forEach((t) => t.stop());
+      v.pause();
       v.srcObject = null;
     }
     setActive(false);
@@ -638,12 +639,14 @@ function ScanTab({ event, secret, setLogs }) {
         {err && <div className="text-sm text-red-600">{err}</div>}
       </div>
       <div className="grid gap-3">
-        <video
-          ref={videoRef}
-          autoPlay
-          playsInline
-          className="w-3/4 rounded-xl border mx-auto"
-        />
+        {active && (
+          <video
+            ref={videoRef}
+            autoPlay
+            playsInline
+            className="w-3/4 rounded-xl border mx-auto"
+          />
+        )}
         <canvas ref={canvasRef} className="hidden" />
       </div>
       <div className="flex items-center gap-2">
