@@ -188,7 +188,8 @@ export function beep(ok) {
     g.connect(ctx.destination);
     o.type = ok ? "sine" : "square";
     o.frequency.value = ok ? 880 : 220;
-    g.gain.value = 0.05;
+    // Increase gain for louder feedback
+    g.gain.value = 0.2;
     o.start();
     setTimeout(() => {
       o.stop();
