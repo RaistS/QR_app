@@ -235,7 +235,6 @@ export default function App() {
           {selectedEvent ? (
             <EventDetail
               event={selectedEvent}
-              events={events}
               setEvents={setEvents}
               secret={secret}
               logs={logs}
@@ -440,23 +439,32 @@ function EventList({
   );
 }
 
-function EventDetail({ event, events, setEvents, secret, logs, setLogs }) {
+function EventDetail({ event, setEvents, secret, logs, setLogs }) {
   const [tab, setTab] = useState("guests");
-  const idx = events.findIndex((e) => e.id === event.id);
 
+  // Use functional updates to avoid stale closures when multiple guest
+  // operations are queued (e.g. bulk CSV imports).
   const updateEvent = (patch) => {
-    const next = [...events];
-    next[idx] = { ...event, ...patch };
-    setEvents(next);
+    setEvents((prev) => {
+      const idx = prev.findIndex((e) => e.id === event.id);
+      if (idx === -1) return prev;
+      const current = prev[idx];
+      const next = [...prev];
+      const resolvedPatch =
+        typeof patch === "function" ? patch(current) : patch;
+      next[idx] = { ...current, ...resolvedPatch };
+      return next;
+    });
   };
 
-  const addGuest = (g) => updateEvent({ guests: [...event.guests, g] });
+  const addGuest = (g) =>
+    updateEvent((ev) => ({ guests: [...ev.guests, g] }));
   const removeGuest = (gid) =>
-    updateEvent({ guests: event.guests.filter((g) => g.id !== gid) });
+    updateEvent((ev) => ({ guests: ev.guests.filter((g) => g.id !== gid) }));
   const updateGuest = (gid, patch) =>
-    updateEvent({
-      guests: event.guests.map((g) => (g.id === gid ? { ...g, ...patch } : g)),
-    });
+    updateEvent((ev) => ({
+      guests: ev.guests.map((g) => (g.id === gid ? { ...g, ...patch } : g)),
+    }));
 
   return (
     <div className="bg-white rounded-2xl shadow p-4">
