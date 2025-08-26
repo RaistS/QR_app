@@ -18,23 +18,37 @@ import {
 
 const SCAN_INTERVAL_MS = 100;
 
-export default function EventDetail({ event, events, setEvents, secret, logs, setLogs }) {
+export default function EventDetail({ event, setEvents, secret, logs, setLogs }) {
   const [tab, setTab] = useState("guests");
-  const idx = events.findIndex((e) => e.id === event.id);
 
+  /**
+   * Updates the current event inside the global events array. The updater can be
+   * either a plain object with the patch or a function that receives the latest
+   * event and returns the patch. Using a functional update ensures we always
+   * operate on the most recent state when multiple updates are queued (e.g.
+   * importing many guests from a CSV).
+   */
   const updateEvent = (patch) => {
-    const next = [...events];
-    next[idx] = { ...event, ...patch };
-    setEvents(next);
+    setEvents((prev) => {
+      const idx = prev.findIndex((e) => e.id === event.id);
+      if (idx === -1) return prev;
+      const current = prev[idx];
+      const next = [...prev];
+      const resolvedPatch =
+        typeof patch === "function" ? patch(current) : patch;
+      next[idx] = { ...current, ...resolvedPatch };
+      return next;
+    });
   };
 
-  const addGuest = (g) => updateEvent({ guests: [...event.guests, g] });
+  const addGuest = (g) =>
+    updateEvent((ev) => ({ guests: [...ev.guests, g] }));
   const removeGuest = (gid) =>
-    updateEvent({ guests: event.guests.filter((g) => g.id !== gid) });
+    updateEvent((ev) => ({ guests: ev.guests.filter((g) => g.id !== gid) }));
   const updateGuest = (gid, patch) =>
-    updateEvent({
-      guests: event.guests.map((g) => (g.id === gid ? { ...g, ...patch } : g)),
-    });
+    updateEvent((ev) => ({
+      guests: ev.guests.map((g) => (g.id === gid ? { ...g, ...patch } : g)),
+    }));
 
   return (
     <div className="bg-white rounded-2xl shadow p-4">
@@ -53,7 +67,15 @@ export default function EventDetail({ event, events, setEvents, secret, logs, se
             }`}
             onClick={() => setTab("guests")}
           >
-            Invitados
+            Gestión
+          </button>
+          <button
+            className={`px-3 py-1.5 rounded-xl border ${
+              tab === "list" ? "bg-gray-900 text-white" : "bg-white"
+            }`}
+            onClick={() => setTab("list")}
+          >
+            Listado
           </button>
           <button
             className={`px-3 py-1.5 rounded-xl border ${
@@ -82,10 +104,10 @@ export default function EventDetail({ event, events, setEvents, secret, logs, se
         </div>
       </div>
 
-      {tab === "guests" && (
-        <GuestsTab
+      {tab === "guests" && <GuestsTab addGuest={addGuest} />}
+      {tab === "list" && (
+        <GuestListTab
           event={event}
-          addGuest={addGuest}
           removeGuest={removeGuest}
           updateGuest={updateGuest}
           secret={secret}
@@ -100,7 +122,7 @@ export default function EventDetail({ event, events, setEvents, secret, logs, se
   );
 }
 
-function GuestsTab({ event, addGuest, removeGuest, updateGuest, secret }) {
+function GuestsTab({ addGuest }) {
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [role, setRole] = useState("");
@@ -108,7 +130,7 @@ function GuestsTab({ event, addGuest, removeGuest, updateGuest, secret }) {
   const [expiresAt, setExpiresAt] = useState("");
 
   return (
-    <div className="mt-4 grid gap-6 lg:grid-cols-[1fr_2fr]">
+    <div className="mt-4 grid gap-6 lg:grid-cols-1">
       <div>
         <h3 className="font-medium mb-2">Alta manual</h3>
         <div className="space-y-2">
@@ -229,75 +251,112 @@ function GuestsTab({ event, addGuest, removeGuest, updateGuest, secret }) {
           </div>
         </div>
       </div>
+    </div>
+  );
+}
 
-      <div>
-        <h3 className="font-medium mb-2">
-          Invitados ({event.guests.length})
-        </h3>
-        <ul className="max-h-[28rem] overflow-auto pr-1 space-y-2">
-          {event.guests.map((g) => (
-            <li
-              key={g.id}
-              className="p-3 rounded-xl border bg-white flex flex-col gap-2"
-            >
-              <div className="flex items-center justify-between gap-3">
-                <div>
-                  <div className="font-medium">
-                    {g.name}{" "}
-                    {g.role && (
-                      <span className="text-xs text-gray-500">— {g.role}</span>
-                    )}
-                  </div>
-                  {g.email && (
-                    <div className="text-xs text-gray-500">{g.email}</div>
+function GuestListTab({ event, removeGuest, updateGuest, secret }) {
+  async function sendQrEmail(guest) {
+    if (!guest.email) {
+      alert("Invitado sin email");
+      return;
+    }
+    try {
+      const payload = makePayload({ eventId: event.id, guest });
+      const token = await tokenFromPayload(payload, secret);
+      const dataUrl = await QRCode.toDataURL(token, { margin: 1, scale: 8 });
+      const subject = encodeURIComponent(`QR para ${guest.name}`);
+      const body = encodeURIComponent(
+        `Hola ${guest.name},\n\nAdjunto tu código QR:\n${dataUrl}\n`
+      );
+      window.location.href = `mailto:${guest.email}?subject=${subject}&body=${body}`;
+    } catch {
+      alert("Error generando QR");
+    }
+  }
+
+  return (
+    <div className="mt-4">
+      <div className="flex items-center justify-between mb-2">
+        <h3 className="font-medium">Invitados ({event.guests.length})</h3>
+        {event.guests.length > 0 && (
+          <button
+            className="px-3 py-1.5 rounded-xl border text-sm"
+            onClick={() => event.guests.forEach((g) => sendQrEmail(g))}
+          >
+            Enviar todos
+          </button>
+        )}
+      </div>
+      <ul className="max-h-[28rem] overflow-auto pr-1 space-y-2">
+        {event.guests.map((g) => (
+          <li
+            key={g.id}
+            className="p-3 rounded-xl border bg-white flex flex-col gap-2"
+          >
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <div className="font-medium">
+                  {g.name}{" "}
+                  {g.role && (
+                    <span className="text-xs text-gray-500">— {g.role}</span>
                   )}
                 </div>
-                <div className="flex items-center gap-2">
-                  <QRButton eventId={event.id} guest={g} secret={secret} />
-                  <button
-                    className="text-xs text-red-600 hover:underline"
-                    onClick={() => {
-                      if (confirm("¿Eliminar invitado?")) removeGuest(g.id);
-                    }}
-                  >
-                    Eliminar
-                  </button>
-                </div>
+                {g.email && (
+                  <div className="text-xs text-gray-500">{g.email}</div>
+                )}
               </div>
-              <div className="grid grid-cols-2 gap-2 text-sm">
-                <label className="flex items-center gap-2">
-                  Caduca:
-                  <input
-                    className="flex-1 px-2 py-1 border rounded-lg"
-                    type="datetime-local"
-                    value={g.expiresAt || ""}
-                    onChange={(e) =>
-                      updateGuest(g.id, { expiresAt: e.target.value })
-                    }
-                  />
-                </label>
-                <label className="flex items-center gap-2">
-                  Rol:
-                  <input
-                    className="flex-1 px-2 py-1 border rounded-lg"
-                    value={g.role || ""}
-                    onChange={(e) => updateGuest(g.id, { role: e.target.value })}
-                  />
-                </label>
+              <div className="flex items-center gap-2">
+                <button
+                  className="px-3 py-1.5 text-sm rounded-xl border"
+                  onClick={() => sendQrEmail(g)}
+                >
+                  Enviar QR
+                </button>
+                <QRButton eventId={event.id} guest={g} secret={secret} />
+                <button
+                  className="text-xs text-red-600 hover:underline"
+                  onClick={() => {
+                    if (confirm("¿Eliminar invitado?")) removeGuest(g.id);
+                  }}
+                >
+                  Eliminar
+                </button>
               </div>
-              <textarea
-                className="w-full px-2 py-1 border rounded-lg text-sm"
-                placeholder="Nota"
-                value={g.note || ""}
-                onChange={(e) => updateGuest(g.id, { note: e.target.value })}
-              />
-            </li>
-          ))}
-          {!event.guests.length && (
-            <li className="text-sm text-gray-500">Aún no hay invitados.</li>
-          )}
-        </ul>
-      </div>
+            </div>
+            <div className="grid grid-cols-2 gap-2 text-sm">
+              <label className="flex items-center gap-2">
+                Caduca:
+                <input
+                  className="flex-1 px-2 py-1 border rounded-lg"
+                  type="datetime-local"
+                  value={g.expiresAt || ""}
+                  onChange={(e) =>
+                    updateGuest(g.id, { expiresAt: e.target.value })
+                  }
+                />
+              </label>
+              <label className="flex items-center gap-2">
+                Rol:
+                <input
+                  className="flex-1 px-2 py-1 border rounded-lg"
+                  value={g.role || ""}
+                  onChange={(e) => updateGuest(g.id, { role: e.target.value })}
+                />
+              </label>
+            </div>
+            <textarea
+              className="w-full px-2 py-1 border rounded-lg text-sm"
+              placeholder="Nota"
+              value={g.note || ""}
+              onChange={(e) => updateGuest(g.id, { note: e.target.value })}
+            />
+          </li>
+        ))}
+        {!event.guests.length && (
+          <li className="text-sm text-gray-500">Aún no hay invitados.</li>
+        )}
+      </ul>
     </div>
   );
 }
@@ -579,7 +638,12 @@ function ScanTab({ event, secret, setLogs }) {
         {err && <div className="text-sm text-red-600">{err}</div>}
       </div>
       <div className="grid gap-3">
-        <video ref={videoRef} autoPlay playsInline className="w-full rounded-xl border" />
+        <video
+          ref={videoRef}
+          autoPlay
+          playsInline
+          className="w-3/4 rounded-xl border mx-auto"
+        />
         <canvas ref={canvasRef} className="hidden" />
       </div>
       <div className="flex items-center gap-2">
@@ -763,9 +827,13 @@ function PrintTab({ event, secret }) {
           const payload = makePayload({ eventId: event.id, guest: g });
           const token = await tokenFromPayload(payload, secret);
           const dataUrl = await QRCode.toDataURL(token, { margin: 1, scale: 6 });
-          return `<div class="card"><img src="${dataUrl}"/><div class="name">${escapeHtml(
+          return `<div class="card"><div class="event">${escapeHtml(
+            event.name
+          )}</div><img src="${dataUrl}"/><div class="name">${escapeHtml(
             g.name
-          )}</div><div class="role">${escapeHtml(g.role || "")}</div></div>`;
+          )}</div><div class="email">${escapeHtml(g.email || "")}</div><div class="role">${escapeHtml(
+            g.role || ""
+          )}</div></div>`;
         })
       );
       const html = `<!doctype html><html><head><meta charset="utf-8"/><title>${escapeHtml(
@@ -774,15 +842,16 @@ function PrintTab({ event, secret }) {
       <style>
         @page { size: A4; margin: 12mm; }
         body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial; }
-        .grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12mm; }
-        .card { border: 1px solid #ccc; border-radius: 10px; padding: 10mm; text-align: center; }
+        .card { border: 1px solid #ccc; border-radius: 10px; padding: 10mm; text-align: center; display: flex; flex-direction: column; align-items: center; justify-content: center; height: calc(100vh - 24mm); page-break-after: always; }
+        .card:last-child { page-break-after: auto; }
         .card img { width: 220px; height: 220px; object-fit: contain; }
+        .event { font-size: 16px; font-weight: 700; margin-bottom: 4mm; }
         .name { font-size: 18px; font-weight: 700; margin-top: 6mm; }
-        .role { font-size: 12px; color: #555; }
+        .email { font-size: 14px; margin-top: 2mm; }
+        .role { font-size: 12px; color: #555; margin-top: 2mm; }
       </style></head>
       <body>
-        <h1>${escapeHtml(event.name)}</h1>
-        <div class="grid">${cards.join("\n")}</div>
+        ${cards.join("\n")}
         <script>window.print()</script>
       </body></html>`;
       const blob = new Blob([html], { type: "text/html" });
