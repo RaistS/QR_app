@@ -808,9 +808,13 @@ function PrintTab({ event, secret }) {
           const payload = makePayload({ eventId: event.id, guest: g });
           const token = await tokenFromPayload(payload, secret);
           const dataUrl = await QRCode.toDataURL(token, { margin: 1, scale: 6 });
-          return `<div class="card"><img src="${dataUrl}"/><div class="name">${escapeHtml(
+          return `<div class="card"><div class="event">${escapeHtml(
+            event.name
+          )}</div><img src="${dataUrl}"/><div class="name">${escapeHtml(
             g.name
-          )}</div><div class="role">${escapeHtml(g.role || "")}</div></div>`;
+          )}</div><div class="email">${escapeHtml(g.email || "")}</div><div class="role">${escapeHtml(
+            g.role || ""
+          )}</div></div>`;
         })
       );
       const html = `<!doctype html><html><head><meta charset="utf-8"/><title>${escapeHtml(
@@ -819,15 +823,16 @@ function PrintTab({ event, secret }) {
       <style>
         @page { size: A4; margin: 12mm; }
         body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial; }
-        .grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12mm; }
-        .card { border: 1px solid #ccc; border-radius: 10px; padding: 10mm; text-align: center; }
+        .card { border: 1px solid #ccc; border-radius: 10px; padding: 10mm; text-align: center; display: flex; flex-direction: column; align-items: center; justify-content: center; height: calc(100vh - 24mm); page-break-after: always; }
+        .card:last-child { page-break-after: auto; }
         .card img { width: 220px; height: 220px; object-fit: contain; }
+        .event { font-size: 16px; font-weight: 700; margin-bottom: 4mm; }
         .name { font-size: 18px; font-weight: 700; margin-top: 6mm; }
-        .role { font-size: 12px; color: #555; }
+        .email { font-size: 14px; margin-top: 2mm; }
+        .role { font-size: 12px; color: #555; margin-top: 2mm; }
       </style></head>
       <body>
-        <h1>${escapeHtml(event.name)}</h1>
-        <div class="grid">${cards.join("\n")}</div>
+        ${cards.join("\n")}
         <script>window.print()</script>
       </body></html>`;
       const blob = new Blob([html], { type: "text/html" });
