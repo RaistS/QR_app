@@ -529,8 +529,8 @@ function ScanTab({ event, secret, setLogs }) {
       const stream = await navigator.mediaDevices.getUserMedia({
         video: {
           facingMode: { ideal: "environment" },
-          width: { ideal: 1280 },
-          height: { ideal: 720 },
+          width: { ideal: 640 },
+          height: { ideal: 360 },
         },
         audio: false,
       });
@@ -547,6 +547,7 @@ function ScanTab({ event, secret, setLogs }) {
       s.getTracks().forEach((t) => t.stop());
       v.srcObject = null;
     }
+    v?.pause();
     setActive(false);
   }
   async function handleToken(token) {
@@ -638,7 +639,14 @@ function ScanTab({ event, secret, setLogs }) {
         {err && <div className="text-sm text-red-600">{err}</div>}
       </div>
       <div className="grid gap-3">
-        <video ref={videoRef} autoPlay playsInline className="w-full rounded-xl border" />
+        {active && (
+          <video
+            ref={videoRef}
+            autoPlay
+            playsInline
+            className="w-full max-w-md mx-auto rounded-xl border"
+          />
+        )}
         <canvas ref={canvasRef} className="hidden" />
       </div>
       <div className="flex items-center gap-2">
