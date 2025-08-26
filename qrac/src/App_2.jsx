@@ -1017,18 +1017,20 @@ function ScanTab({ event, secret, logs, setLogs }) {
   return (
     <div className="mt-4 grid gap-6">
       <div className="flex items-center gap-2 flex-wrap">
-        {!active ? (
-          <button
-            className="px-4 py-2 rounded-xl bg-gray-900 text-white"
-            onClick={start}
-          >
-            Iniciar cámara
-          </button>
-        ) : (
-          <button className="px-4 py-2 rounded-xl border" onClick={stop}>
-            Detener
-          </button>
-        )}
+        <button
+          className="px-4 py-2 rounded-xl bg-gray-900 text-white disabled:opacity-50"
+          onClick={start}
+          disabled={active}
+        >
+          Abrir cámara
+        </button>
+        <button
+          className="px-4 py-2 rounded-xl border disabled:opacity-50"
+          onClick={stop}
+          disabled={!active}
+        >
+          Cerrar cámara
+        </button>
         <button
           className="px-4 py-2 rounded-xl border"
           onClick={() => {
