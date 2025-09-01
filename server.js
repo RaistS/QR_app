@@ -1,8 +1,10 @@
 import express from 'express';
+import cors from 'cors';
 import nodemailer from 'nodemailer';
 
 const app = express();
 app.use(express.json({ limit: '10mb' }));
+app.use(cors());
 
 app.post('/api/send-qr', async (req, res) => {
   const { email, qrData, subject, body } = req.body || {};
