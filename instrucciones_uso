@@ -1,3 +1,14 @@
-cd C:\Programacion\QR_app\qrac
-npm run dev
+# Instalación y uso
 
+Para que el envío de correo funcione es necesario levantar el servidor backend que expone **/api/send-qr**.
+
+1. Desde la carpeta raíz del proyecto:
+   npm install
+   npm start
+   Esto inicia el servidor en http://localhost:3001.
+
+2. En otra terminal lanzar la aplicación cliente:
+   cd qrac
+   npm run dev
+
+Asegúrate de definir las variables de entorno descritas en `.env.example`.
