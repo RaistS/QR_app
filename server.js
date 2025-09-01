@@ -12,18 +12,21 @@ app.post('/api/send-qr', async (req, res) => {
   try {
     const transporter = nodemailer.createTransport({
       host: process.env.SMTP_HOST,
-      port: process.env.SMTP_PORT,
-      secure: process.env.SMTP_SECURE === 'true',
-      auth: process.env.SMTP_USER
+      port: Number(process.env.SMTP_PORT),
+      secure: process.env.SMTP_TLS === 'true',
+      auth: process.env.SMTP_USERNAME
         ? {
-            user: process.env.SMTP_USER,
-            pass: process.env.SMTP_PASS,
+            user: process.env.SMTP_USERNAME,
+            pass: process.env.SMTP_PASSWORD,
           }
         : undefined,
     });
 
+    const fromAddress = process.env.MAIL_FROM || process.env.SMTP_USERNAME;
+    const fromName = process.env.MAIL_FROM_NAME;
+
     await transporter.sendMail({
-      from: process.env.SMTP_FROM || process.env.SMTP_USER,
+      from: fromName ? `${fromName} <${fromAddress}>` : fromAddress,
       to: email,
       subject,
       text: body,
