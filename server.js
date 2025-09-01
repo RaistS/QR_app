@@ -1,6 +1,27 @@
 import express from 'express';
 import cors from 'cors';
 import nodemailer from 'nodemailer';
+import fs from 'fs';
+import path from 'path';
+
+// Load .env file if present to populate process.env
+const envPath = path.resolve('.env');
+if (fs.existsSync(envPath)) {
+  const envLines = fs.readFileSync(envPath, 'utf8').split('\n');
+  for (const line of envLines) {
+    const match = line.match(/^\s*([^#=]+)\s*=\s*(.*)\s*$/);
+    if (match) {
+      const key = match[1];
+      if (!(key in process.env)) {
+        let value = match[2].trim();
+        if (value.startsWith('"') && value.endsWith('"')) {
+          value = value.slice(1, -1);
+        }
+        process.env[key] = value;
+      }
+    }
+  }
+}
 
 const app = express();
 app.use(express.json({ limit: '10mb' }));
