@@ -27,23 +27,37 @@ const app = express();
 app.use(express.json({ limit: '10mb' }));
 app.use(cors());
 
+function createTransporterFromEnv() {
+  if (!process.env.SMTP_HOST || !process.env.SMTP_PORT) {
+    return null;
+  }
+  return nodemailer.createTransport({
+    host: process.env.SMTP_HOST,
+    port: Number(process.env.SMTP_PORT),
+    secure: process.env.SMTP_TLS === 'true',
+    auth: process.env.SMTP_USERNAME
+      ? {
+          user: process.env.SMTP_USERNAME,
+          pass: process.env.SMTP_PASSWORD,
+        }
+      : undefined,
+  });
+}
+
+const transporter = createTransporterFromEnv();
+if (!transporter) {
+  console.warn('SMTP configuration missing; email sending disabled');
+}
+
 app.post('/api/send-qr', async (req, res) => {
   const { email, qrData, subject, body } = req.body || {};
   if (!email || !qrData || !subject || !body) {
     return res.status(400).json({ ok: false, error: 'Missing fields' });
   }
   try {
-    const transporter = nodemailer.createTransport({
-      host: process.env.SMTP_HOST,
-      port: Number(process.env.SMTP_PORT),
-      secure: process.env.SMTP_TLS === 'true',
-      auth: process.env.SMTP_USERNAME
-        ? {
-            user: process.env.SMTP_USERNAME,
-            pass: process.env.SMTP_PASSWORD,
-          }
-        : undefined,
-    });
+    if (!transporter) {
+      throw new Error('SMTP not configured');
+    }
 
     const fromAddress = process.env.MAIL_FROM || process.env.SMTP_USERNAME;
     const fromName = process.env.MAIL_FROM_NAME;
