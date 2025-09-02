@@ -6,6 +6,7 @@ Para que el envío de correo funcione es necesario levantar el servidor backend 
    npm install
    npm start
    Esto inicia el servidor en http://localhost:3001.
+Si este servicio no está activo, la aplicación cliente mostrará errores como `http proxy error: /api/send-qr ECONNREFUSED` al intentar enviar correo.
 
 2. En otra terminal lanzar la aplicación cliente:
    cd qrac
