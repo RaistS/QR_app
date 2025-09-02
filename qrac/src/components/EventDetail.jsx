@@ -502,6 +502,7 @@ function ScanTab({ event, secret, setLogs }) {
   const canvasRef = useRef(null);
   const [active, setActive] = useState(false);
   const [last, setLast] = useState(null);
+  const [mode, setMode] = useState("in");
   const [err, setErr] = useState("");
   const lastTickRef = useRef(0);
 
@@ -602,30 +603,54 @@ function ScanTab({ event, secret, setLogs }) {
         return;
       }
       const { jti } = res.payload || {};
-      const usedKey = `used_${event.id}`;
-      const used = new Set(
-        JSON.parse(localStorage.getItem(usedKey) || "[]")
-      );
-      if (jti && used.has(jti)) {
-        persistLog({ ok: false, reason: "QR ya usado", payload: res.payload });
-        beep(false);
-        setLast({ raw: token, status: "error", reason: "QR ya usado" });
-        return;
+      const usedInKey = `used_${event.id}`; // check-in set (compat)
+      const usedOutKey = `used_out_${event.id}`;
+      const usedIn = new Set(JSON.parse(localStorage.getItem(usedInKey) || "[]"));
+      const usedOut = new Set(JSON.parse(localStorage.getItem(usedOutKey) || "[]"));
+
+      if (mode === "in") {
+        if (jti && usedIn.has(jti)) {
+          persistLog({ ok: false, reason: "QR ya usado", payload: res.payload, action: "checkin" });
+          beep(false);
+          setLast({ raw: token, status: "error", reason: "QR ya usado" });
+          return;
+        }
+        persistLog({ ok: true, guest, action: "checkin" });
+        if (jti) {
+          usedIn.add(jti);
+          localStorage.setItem(usedInKey, JSON.stringify([...usedIn]));
+        }
+        beep(true);
+        setLast({ raw: token, status: "ok", guest });
+      } else {
+        // checkout
+        if (jti && !usedIn.has(jti)) {
+          persistLog({ ok: false, reason: "Sin check-in previo", payload: res.payload, action: "checkout" });
+          beep(false);
+          setLast({ raw: token, status: "error", reason: "Sin check-in previo" });
+          return;
+        }
+        if (jti && usedOut.has(jti)) {
+          persistLog({ ok: false, reason: "Ya hizo check-out", payload: res.payload, action: "checkout" });
+          beep(false);
+          setLast({ raw: token, status: "error", reason: "Ya hizo check-out" });
+          return;
+        }
+        persistLog({ ok: true, guest, action: "checkout" });
+        if (jti) {
+          usedOut.add(jti);
+          localStorage.setItem(usedOutKey, JSON.stringify([...usedOut]));
+        }
+        beep(true);
+        setLast({ raw: token, status: "ok", guest });
       }
-      persistLog({ ok: true, guest });
-      if (jti) {
-        used.add(jti);
-        localStorage.setItem(usedKey, JSON.stringify([...used]));
-      }
-      beep(true);
-      setLast({ raw: token, status: "ok", guest });
     } else {
-      persistLog({ ok: false, reason: res.reason });
+      persistLog({ ok: false, reason: res.reason, action: mode });
       beep(false);
       setLast({ raw: token, status: "error", reason: res.reason });
     }
   }
-  function persistLog({ ok, guest = null, reason = null, payload = null }) {
+  function persistLog({ ok, guest = null, reason = null, payload = null, action = null }) {
     const item = {
       id: uuidv4(),
       eventId: event.id,
@@ -635,6 +660,7 @@ function ScanTab({ event, secret, setLogs }) {
       device: navigator.userAgent,
       ok,
       reason,
+      action,
     };
     setLogs((prev) => [...prev, item]);
   }
@@ -663,6 +689,21 @@ function ScanTab({ event, secret, setLogs }) {
           }}
         >
           Reset usados (evento)
+        </button>
+        <button
+          className="px-4 py-2 rounded-xl border"
+          onClick={() => setMode((m) => (m === "in" ? "out" : "in"))}
+        >
+          Modo: {mode === "in" ? "Check-in" : "Check-out"}
+        </button>
+        <button
+          className="px-4 py-2 rounded-xl border"
+          onClick={() => {
+            localStorage.removeItem(`used_out_${event.id}`);
+            alert("Reseteado el registro de check-out para este evento.");
+          }}
+        >
+          Reset check-out (evento)
         </button>
         {err && <div className="text-sm text-red-600">{err}</div>}
       </div>
@@ -773,6 +814,7 @@ function ExportTab({ event, logs }) {
               guestId: l.guestId || "",
               guestName: l.guestName || "",
               ok: l.ok ? "1" : "0",
+              action: l.action || "checkin",
               reason: l.reason || "",
               device: l.device,
             }));
@@ -818,6 +860,7 @@ function ExportTab({ event, logs }) {
             <tr>
               <th className="p-2 text-left">Fecha</th>
               <th className="p-2 text-left">Invitado</th>
+              <th className="p-2 text-left">Acci��n</th>
               <th className="p-2 text-left">OK</th>
               <th className="p-2 text-left">Motivo</th>
               <th className="p-2 text-left">Dispositivo</th>
