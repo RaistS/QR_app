@@ -259,7 +259,7 @@ function GuestListTab({ event, removeGuest, updateGuest, secret }) {
   const [sending, setSending] = useState(false);
   const [feedback, setFeedback] = useState(null);
 
-  async function sendQrEmail(guest) {
+  /* async function sendQrEmail(guest) {
     if (!guest.email) {
       alert("Invitado sin email");
       return;
@@ -290,13 +290,13 @@ function GuestListTab({ event, removeGuest, updateGuest, secret }) {
     } finally {
       setSending(false);
     }
-  }
+  } */
 
   return (
     <div className="mt-4">
       <div className="flex items-center justify-between mb-2">
         <h3 className="font-medium">Invitados ({event.guests.length})</h3>
-        {event.guests.length > 0 && (
+        {false && (
           <button
             className="px-3 py-1.5 rounded-xl border text-sm"
             disabled={sending}
@@ -310,9 +310,10 @@ function GuestListTab({ event, removeGuest, updateGuest, secret }) {
           </button>
         )}
       </div>
-      {feedback && (
+      {/** feedback deshabilitado */}
+      {/* {feedback && (
         <div className="mb-2 text-sm">{feedback}</div>
-      )}
+      )} */}
       <ul className="max-h-[28rem] overflow-auto pr-1 space-y-2">
         {event.guests.map((g) => (
           <li
@@ -332,13 +333,13 @@ function GuestListTab({ event, removeGuest, updateGuest, secret }) {
                 )}
               </div>
               <div className="flex items-center gap-2">
-                <button
+                {/* <button
                   className="px-3 py-1.5 text-sm rounded-xl border"
                   disabled={sending}
                   onClick={() => sendQrEmail(g)}
                 >
                   {sending ? "Enviando..." : "Enviar QR"}
-                </button>
+                </button> */}
                 <QRButton eventId={event.id} guest={g} secret={secret} />
                 <button
                   className="text-xs text-red-600 hover:underline"
