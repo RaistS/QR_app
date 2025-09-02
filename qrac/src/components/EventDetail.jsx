@@ -127,7 +127,7 @@ function GuestsTab({ addGuest }) {
   const [email, setEmail] = useState("");
   const [role, setRole] = useState("");
   const [note, setNote] = useState("");
-  const [expiresAt, setExpiresAt] = useState("");
+  const [registeredAt, setRegisteredAt] = useState("");
 
   return (
     <div className="mt-4 grid gap-6 lg:grid-cols-1">
@@ -156,9 +156,9 @@ function GuestsTab({ addGuest }) {
             <input
               className="px-3 py-2 border rounded-xl"
               type="datetime-local"
-              value={expiresAt}
-              onChange={(e) => setExpiresAt(e.target.value)}
-              title="Caducidad del QR (opcional)"
+              value={registeredAt}
+              onChange={(e) => setRegisteredAt(e.target.value)}
+              title="Fecha de inscripción (opcional)"
             />
           </div>
           <textarea
@@ -177,13 +177,13 @@ function GuestsTab({ addGuest }) {
                 email: email.trim(),
                 role: role.trim(),
                 note: note.trim(),
-                expiresAt,
+                registeredAt,
               });
               setName("");
               setEmail("");
               setRole("");
               setNote("");
-              setExpiresAt("");
+              setRegisteredAt("");
             }}
           >
             Añadir invitado
@@ -191,9 +191,9 @@ function GuestsTab({ addGuest }) {
         </div>
 
         <div className="mt-6 space-y-2">
-          <h3 className="font-medium">Importación CSV</h3>
+          <h3 className="font-medium">Importacion CSV</h3>
           <p className="text-xs text-gray-600">
-            Cabeceras soportadas: <code>name,email,role,note,expiresAt</code>.
+            Cabeceras soportadas: <code>name,email,role,note,registeredAt</code>.
             Formato de fecha: ISO o <code>YYYY-MM-DD HH:mm</code>.
           </p>
           <div className="flex items-center gap-2">
@@ -220,7 +220,7 @@ function GuestsTab({ addGuest }) {
                           email: (r.email || "").trim(),
                           role: (r.role || "").trim(),
                           note: (r.note || "").trim(),
-                          expiresAt: (r.expiresAt || "").trim(),
+                          registeredAt: (r.registeredAt || r.expiresAt || "").trim(),
                         };
                         if (g.name) {
                           added.push(g);
@@ -241,7 +241,7 @@ function GuestsTab({ addGuest }) {
               onClick={() => {
                 const sample =
                   `name,email,role,note,expiresAt\n` +
-                  `Ada Lovelace,ada@demo.com,VIP,,2025-12-31 23:59\n` +
+                  `Ada Lovelace,ada@demo.com,VIP,,2025-12-31 18:45\n` +
                   `Luis Pérez,luis@demo.com,Invitado,,\n`;
                 downloadBlob("invitados_ejemplo.csv", "text/csv", sample);
               }}
@@ -353,13 +353,13 @@ function GuestListTab({ event, removeGuest, updateGuest, secret }) {
             </div>
             <div className="grid grid-cols-2 gap-2 text-sm">
               <label className="flex items-center gap-2">
-                Caduca:
+                Inscripción:
                 <input
                   className="flex-1 px-2 py-1 border rounded-lg"
                   type="datetime-local"
-                  value={g.expiresAt || ""}
+                  value={g.registeredAt || g.expiresAt || ""}
                   onChange={(e) =>
-                    updateGuest(g.id, { expiresAt: e.target.value })
+                    updateGuest(g.id, { registeredAt: e.target.value })
                   }
                 />
               </label>
@@ -502,7 +502,6 @@ function ScanTab({ event, secret, setLogs }) {
   const canvasRef = useRef(null);
   const [active, setActive] = useState(false);
   const [last, setLast] = useState(null);
-  const [mode, setMode] = useState("in");
   const [err, setErr] = useState("");
   const lastTickRef = useRef(0);
 
@@ -602,50 +601,30 @@ function ScanTab({ event, secret, setLogs }) {
         });
         return;
       }
-      const { jti } = res.payload || {};
-      const usedInKey = `used_${event.id}`; // check-in set (compat)
-      const usedOutKey = `used_out_${event.id}`;
-      const usedIn = new Set(JSON.parse(localStorage.getItem(usedInKey) || "[]"));
-      const usedOut = new Set(JSON.parse(localStorage.getItem(usedOutKey) || "[]"));
+      // Presence map per event: { [guestId]: 'in' | 'out' }
+      const presenceKey = `presence_${event.id}`;
+      const presence = (() => {
+        try { return JSON.parse(localStorage.getItem(presenceKey) || "{}"); } catch { return {}; }
+      })();
+      const current = presence[guest.id] === "in" ? "in" : "out";
 
-      if (mode === "in") {
-        if (jti && usedIn.has(jti)) {
-          persistLog({ ok: false, reason: "QR ya usado", payload: res.payload, action: "checkin" });
-          beep(false);
-          setLast({ raw: token, status: "error", reason: "QR ya usado" });
-          return;
-        }
-        persistLog({ ok: true, guest, action: "checkin" });
-        if (jti) {
-          usedIn.add(jti);
-          localStorage.setItem(usedInKey, JSON.stringify([...usedIn]));
-        }
+      if (current === "in") {
+        // Toggle to check-out
+        persistLog({ ok: true, guest, action: "out" });
+        presence[guest.id] = "out";
+        localStorage.setItem(presenceKey, JSON.stringify(presence));
         beep(true);
         setLast({ raw: token, status: "ok", guest });
       } else {
-        // checkout
-        if (jti && !usedIn.has(jti)) {
-          persistLog({ ok: false, reason: "Sin check-in previo", payload: res.payload, action: "checkout" });
-          beep(false);
-          setLast({ raw: token, status: "error", reason: "Sin check-in previo" });
-          return;
-        }
-        if (jti && usedOut.has(jti)) {
-          persistLog({ ok: false, reason: "Ya hizo check-out", payload: res.payload, action: "checkout" });
-          beep(false);
-          setLast({ raw: token, status: "error", reason: "Ya hizo check-out" });
-          return;
-        }
-        persistLog({ ok: true, guest, action: "checkout" });
-        if (jti) {
-          usedOut.add(jti);
-          localStorage.setItem(usedOutKey, JSON.stringify([...usedOut]));
-        }
+        // Toggle to check-in
+        persistLog({ ok: true, guest, action: "in" });
+        presence[guest.id] = "in";
+        localStorage.setItem(presenceKey, JSON.stringify(presence));
         beep(true);
         setLast({ raw: token, status: "ok", guest });
       }
     } else {
-      persistLog({ ok: false, reason: res.reason, action: mode });
+      persistLog({ ok: false, reason: res.reason });
       beep(false);
       setLast({ raw: token, status: "error", reason: res.reason });
     }
@@ -684,27 +663,13 @@ function ScanTab({ event, secret, setLogs }) {
         <button
           className="px-4 py-2 rounded-xl border"
           onClick={() => {
-            localStorage.removeItem(`used_${event.id}`);
-            alert("Reseteado el registro de QR usados para este evento.");
+            localStorage.removeItem(`presence_${event.id}`);
+            alert("Reseteado el estado de presencia para este evento.");
           }}
         >
-          Reset usados (evento)
+          Reset presencia (evento)
         </button>
-        <button
-          className="px-4 py-2 rounded-xl border"
-          onClick={() => setMode((m) => (m === "in" ? "out" : "in"))}
-        >
-          Modo: {mode === "in" ? "Check-in" : "Check-out"}
-        </button>
-        <button
-          className="px-4 py-2 rounded-xl border"
-          onClick={() => {
-            localStorage.removeItem(`used_out_${event.id}`);
-            alert("Reseteado el registro de check-out para este evento.");
-          }}
-        >
-          Reset check-out (evento)
-        </button>
+        
         {err && <div className="text-sm text-red-600">{err}</div>}
       </div>
       <div className="grid gap-3">
@@ -814,7 +779,7 @@ function ExportTab({ event, logs }) {
               guestId: l.guestId || "",
               guestName: l.guestName || "",
               ok: l.ok ? "1" : "0",
-              action: l.action || "checkin",
+              action: l.action || "in",
               reason: l.reason || "",
               device: l.device,
             }));
@@ -828,13 +793,38 @@ function ExportTab({ event, logs }) {
         <button
           className="px-4 py-2 rounded-xl border"
           onClick={() => {
+            const rows = eventLogs.map((l) => ({
+              when: l.whenISO,
+              guestId: l.guestId || "",
+              guestName: l.guestName || "",
+              action: (l.action || "in") === "out" ? "OUT" : "IN",
+              ok: l.ok ? "1" : "0",
+              reason: l.reason || "",
+              device: l.device,
+            }));
+            const csv = Papa.unparse(rows);
+            downloadBlob(`${slug(event.name)}_movimientos.csv`, "text/csv", csv);
+          }}
+        >
+          Exportar IN/OUT CSV
+        </button>
+
+        <button
+          className="px-4 py-2 rounded-xl border"
+          onClick={() => {
+            const presenceKey = `presence_${event.id}`;
+            let presence = {};
+            try {
+              presence = JSON.parse(localStorage.getItem(presenceKey) || "{}");
+            } catch {}
             const rows = event.guests.map((g) => ({
               id: g.id,
               name: g.name,
               email: g.email || "",
               role: g.role || "",
               note: g.note || "",
-              expiresAt: g.expiresAt || "",
+              registeredAt: g.registeredAt || g.expiresAt || "",
+              presence: presence[g.id] === "in" ? "IN" : "OUT",
             }));
             const csv = Papa.unparse(rows);
             downloadBlob(`${slug(event.name)}_invitados.csv`, "text/csv", csv);
@@ -857,7 +847,7 @@ function ExportTab({ event, logs }) {
       <div className="max-h-80 overflow-auto border rounded-xl">
         <table className="w-full text-sm">
           <thead className="bg-gray-50 sticky top-0">
-            <tr>
+            <tr className="hidden">
               <th className="p-2 text-left">Fecha</th>
               <th className="p-2 text-left">Invitado</th>
               <th className="p-2 text-left">Acci��n</th>
@@ -865,8 +855,16 @@ function ExportTab({ event, logs }) {
               <th className="p-2 text-left">Motivo</th>
               <th className="p-2 text-left">Dispositivo</th>
             </tr>
+            <tr>
+              <th className="p-2 text-left">Fecha</th>
+              <th className="p-2 text-left">Invitado</th>
+              <th className="p-2 text-left">Accion</th>
+              <th className="p-2 text-left">OK</th>
+              <th className="p-2 text-left">Motivo</th>
+              <th className="p-2 text-left">Dispositivo</th>
+            </tr>
           </thead>
-          <tbody>
+          <tbody className="hidden">
             {eventLogs
               .slice()
               .reverse()
@@ -876,11 +874,27 @@ function ExportTab({ event, logs }) {
                     {fmtDateTime(l.whenISO)}
                   </td>
                   <td className="p-2">{l.guestName || l.guestId || "-"}</td>
+                  <td className="p-2">{(l.action || "in") === "out" ? "OUT" : "IN"}</td>
                   <td className="p-2">{l.ok ? "✔" : "✖"}</td>
                   <td className="p-2">{l.reason || ""}</td>
                   <td className="p-2 truncate max-w-[16rem]" title={l.device}>
                     {l.device}
                   </td>
+                </tr>
+              ))}
+          </tbody>
+          <tbody>
+            {eventLogs
+              .slice()
+              .reverse()
+              .map((l) => (
+                <tr key={l.id} className="border-t">
+                  <td className="p-2 whitespace-nowrap">{fmtDateTime(l.whenISO)}</td>
+                  <td className="p-2">{l.guestName || l.guestId || "-"}</td>
+                  <td className="p-2">{(l.action || "in") === "out" ? "OUT" : "IN"}</td>
+                  <td className="p-2">{l.ok ? "OK" : "X"}</td>
+                  <td className="p-2">{l.reason || ""}</td>
+                  <td className="p-2 truncate max-w-[16rem]" title={l.device}>{l.device}</td>
                 </tr>
               ))}
           </tbody>
@@ -952,4 +966,9 @@ function PrintTab({ event, secret }) {
     </div>
   );
 }
+
+
+
+
+
 
