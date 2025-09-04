@@ -1,15 +1,11 @@
-# Instalación y uso
+Cómo ejecutar
 
-Para que el envío de correo funcione es necesario levantar el servidor backend que expone **/api/send-qr**.
-
-1. Desde la carpeta raíz del proyecto:
-   npm install
-   npm start
-   Esto inicia el servidor en http://localhost:3001.
-Si este servicio no está activo, la aplicación cliente mostrará errores como `http proxy error: /api/send-qr ECONNREFUSED` al intentar enviar correo.
-
-2. En otra terminal lanzar la aplicación cliente:
-   cd qrac
-   npm run dev
-
-Asegúrate de definir las variables de entorno descritas en `.env.example`.
+Backend API: en la raíz
+Instalar deps: npm install
+Arrancar API: npm start (escucha en :3001)
+Frontend (build para Electron):
+Instalar deps: cd qrac && npm install
+Build: desde la raíz npm run build:web (genera qrac/dist)
+Electron (app de escritorio):
+Desarrollo empaquetado sencillo: npm run dev:electron (usa qrac/dist)
+Empaquetar Windows (si tienes electron-builder): npm run pack:win

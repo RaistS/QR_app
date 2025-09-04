@@ -1,14 +1,53 @@
 {
-  "name": "qrac-server",
+  "name": "qr_app",
   "version": "1.0.0",
   "private": true,
-  "type": "module",
+  "description": "QR Access Control desktop app (Electron + Vite)",
+  "author": "",
+  "main": "electron/main.js",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "build:web": "cd qrac && npm install && npm run build",
+    "dev:electron": "npm run build:web && npx electron electron/main.js",
+    "clean": "node scripts/clean.js",
+    "icon:build": "node scripts/png2ico.js",
+    "pack:win": "npm run clean && npm run build:web && npm run icon:build && npx electron-builder --win",
+    "pack:win:nosign": "set CSC_IDENTITY_AUTO_DISCOVERY=false&& set WIN_CSC_LINK=&& set WIN_CSC_KEY_PASSWORD=&& npm run clean && npm run build:web && npm run icon:build && npx electron-builder --win"
+  },
+  "build": {
+    "appId": "com.qrac.app",
+    "productName": "QR Access Control",
+    "files": [
+      "electron/**/*",
+      "qrac/dist/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      { "from": "qrac/dist", "to": "qrac/dist" }
+    ],
+    "asar": true,
+    "win": {
+      "target": "nsis",
+      "icon": "electron/icon.ico"
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": false,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "QR Access Control",
+      "installerIcon": "electron/icon.ico",
+      "uninstallerIcon": "electron/icon.ico"
+    }
   },
   "dependencies": {
     "cors": "^2.8.5",
     "express": "^4.18.2",
     "nodemailer": "^6.9.8"
+  },
+  "devDependencies": {
+    "electron": "^30.0.0",
+    "electron-builder": "^24.0.0"
   }
 }

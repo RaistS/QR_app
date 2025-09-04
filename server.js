@@ -1,9 +1,9 @@
-import express from 'express';
-import cors from 'cors';
-import nodemailer from 'nodemailer';
-import https from 'https';
-import fs from 'fs';
-import path from 'path';
+const express = require('express');
+const cors = require('cors');
+const nodemailer = require('nodemailer');
+const https = require('https');
+const fs = require('fs');
+const path = require('path');
 
 // Load .env file if present to populate process.env
 const envPath = path.resolve('.env');
