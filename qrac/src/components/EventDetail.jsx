@@ -116,7 +116,9 @@ export default function EventDetail({ event, setEvents, secret, logs, setLogs })
       {tab === "scan" && (
         <ScanTab event={event} secret={secret} setLogs={setLogs} />
       )}
-      {tab === "export" && <ExportTab event={event} logs={logs} />}
+      {tab === "export" && (
+        <ExportTab event={event} logs={logs} setLogs={setLogs} />
+      )}
       {tab === "print" && <PrintTab event={event} secret={secret} />}
     </div>
   );
@@ -341,6 +343,144 @@ function GuestListTab({ event, removeGuest, updateGuest, secret }) {
                   {sending ? "Enviando..." : "Enviar QR"}
                 </button> */}
                 <QRButton eventId={event.id} guest={g} secret={secret} />
+                {g.email && (
+                  <a
+                    href={`mailto:${encodeURIComponent(g.email)}?subject=${encodeURIComponent(
+                      `Invitación al evento: ${event.name}`
+                    )}&body=${encodeURIComponent(
+                      `Hola ${g.name},\n\nAquí tienes tu invitación para el evento "${event.name}".\n\nRecuerda traer tu QR para acceder.\n\n¡Nos vemos!\n`
+                    )}`}
+                    className="text-xs px-2 py-1 rounded-lg border hover:bg-gray-100"
+                    title={`Enviar correo a ${g.email}`}
+                  >
+                    Enviar correo
+                  </a>
+                )}
+                <button
+                  className="text-xs px-2 py-1 rounded-lg border hover:bg-gray-100"
+                  title="Descargar QR y token"
+                  onClick={async () => {
+                    try {
+                      const payload = makePayload({ eventId: event.id, guest: g });
+                      const t = await tokenFromPayload(payload, secret);
+                      const dataUrl = await QRCode.toDataURL(t, { margin: 1, scale: 8 });
+                      const base = `${slug(event.name)}_${slug(g.name)}`;
+                      // Descargar PNG
+                      const a = document.createElement("a");
+                      a.href = dataUrl;
+                      a.download = `${base}_QR.png`;
+                      a.click();
+                      // Descargar TXT con token
+                      downloadBlob(`${base}_TOKEN.txt`, "text/plain", t);
+                    } catch (e) {
+                      alert("No se pudo generar el QR/token");
+                      console.error(e);
+                    }
+                  }}
+                >
+                  Descargar QR+token
+                </button>
+                <button
+                  className="text-xs px-2 py-1 rounded-lg border hover:bg-gray-100"
+                  title="Descargar PNG con nombre y token"
+                  onClick={async () => {
+                    try {
+                      const payload = makePayload({ eventId: event.id, guest: g });
+                      const t = await tokenFromPayload(payload, secret);
+                      const qrUrl = await QRCode.toDataURL(t, { margin: 1, scale: 8 });
+
+                      const canvas = document.createElement('canvas');
+                      const ctx = canvas.getContext('2d');
+
+                      const pad = 24;
+                      const width = 720;
+                      const qrSize = 480;
+                      const nameFont = 'bold 28px system-ui, -apple-system, Segoe UI, Roboto, sans-serif';
+                      const tokenFont = '600 14px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace';
+                      const lineGap = 6;
+                      const nameGap = 16;
+                      const qrGap = 16;
+
+                      // Preparar líneas de token (troceado fijo para ajustar ancho)
+                      const chunk = (s, n) => s.match(new RegExp(`.{1,${32}}`, 'g')) || [s];
+                      const tokenLines = chunk(t, 32);
+                      const tokenLineHeight = 18; // px
+                      const tokenBlockHeight = tokenLines.length * tokenLineHeight + (tokenLines.length - 1) * lineGap;
+
+                      // Calcular alto total
+                      const height = pad + 32 /*aprox alto nombre*/ + nameGap + qrSize + qrGap + tokenBlockHeight + pad;
+                      canvas.width = width;
+                      canvas.height = height;
+
+                      // Fondo blanco
+                      ctx.fillStyle = '#ffffff';
+                      ctx.fillRect(0, 0, width, height);
+
+                      // Nombre centrado arriba
+                      ctx.fillStyle = '#111827';
+                      ctx.font = nameFont;
+                      ctx.textAlign = 'center';
+                      ctx.textBaseline = 'top';
+                      ctx.fillText(g.name || 'Invitado', width / 2, pad);
+
+                      // Cargar QR y dibujar centrado
+                      await new Promise((resolve, reject) => {
+                        const img = new Image();
+                        img.onload = () => {
+                          const x = (width - qrSize) / 2;
+                          const y = pad + 32 + nameGap; // debajo del nombre
+                          ctx.drawImage(img, x, y, qrSize, qrSize);
+                          resolve();
+                        };
+                        img.onerror = reject;
+                        img.src = qrUrl;
+                      });
+
+                      // Token abajo, centrado, en varias líneas
+                      ctx.font = tokenFont;
+                      ctx.fillStyle = '#374151';
+                      ctx.textAlign = 'center';
+                      ctx.textBaseline = 'top';
+                      let y = pad + 32 + nameGap + qrSize + qrGap;
+                      for (const line of tokenLines) {
+                        ctx.fillText(line, width / 2, y);
+                        y += tokenLineHeight + lineGap;
+                      }
+
+                      // Descargar imagen compuesta
+                      const base = `${slug(event.name)}_${slug(g.name)}`;
+                      const a = document.createElement('a');
+                      a.href = canvas.toDataURL('image/png');
+                      a.download = `${base}_tarjeta.png`;
+                      a.click();
+                    } catch (e) {
+                      alert('No se pudo generar la tarjeta');
+                      console.error(e);
+                    }
+                  }}
+                >
+                  Descargar tarjeta (PNG)
+                </button>
+                {g.email && (
+                  <button
+                    className={`text-xs px-2 py-1 rounded-lg border ${
+                      g.emailSent
+                        ? "bg-green-100 text-green-800 border-green-600"
+                        : "hover:bg-gray-100"
+                    }`}
+                    onClick={() =>
+                      updateGuest(
+                        g.id,
+                        g.emailSent
+                          ? { emailSent: false, emailSentAt: "" }
+                          : { emailSent: true, emailSentAt: nowISO() }
+                      )
+                    }
+                    title={g.emailSent ? "Desmarcar enviado" : "Marcar como enviado"}
+                  >
+                    {g.emailSent ? "Ya enviado" : "Marcar enviado"}
+                  </button>
+                )}
                 <button
                   className="text-xs text-red-600 hover:underline"
                   onClick={() => {
@@ -601,28 +741,10 @@ function ScanTab({ event, secret, setLogs }) {
         });
         return;
       }
-      // Presence map per event: { [guestId]: 'in' | 'out' }
-      const presenceKey = `presence_${event.id}`;
-      const presence = (() => {
-        try { return JSON.parse(localStorage.getItem(presenceKey) || "{}"); } catch { return {}; }
-      })();
-      const current = presence[guest.id] === "in" ? "in" : "out";
-
-      if (current === "in") {
-        // Toggle to check-out
-        persistLog({ ok: true, guest, action: "out" });
-        presence[guest.id] = "out";
-        localStorage.setItem(presenceKey, JSON.stringify(presence));
-        beep(true);
-        setLast({ raw: token, status: "ok", guest });
-      } else {
-        // Toggle to check-in
-        persistLog({ ok: true, guest, action: "in" });
-        presence[guest.id] = "in";
-        localStorage.setItem(presenceKey, JSON.stringify(presence));
-        beep(true);
-        setLast({ raw: token, status: "ok", guest });
-      }
+      // Nueva lógica: sin control IN/OUT, solo registrar cada check con hora
+      persistLog({ ok: true, guest, action: "check" });
+      beep(true);
+      setLast({ raw: token, status: "ok", guest });
     } else {
       persistLog({ ok: false, reason: res.reason });
       beep(false);
@@ -660,15 +782,7 @@ function ScanTab({ event, secret, setLogs }) {
         >
           Cerrar cámara
         </button>
-        <button
-          className="px-4 py-2 rounded-xl border"
-          onClick={() => {
-            localStorage.removeItem(`presence_${event.id}`);
-            alert("Reseteado el estado de presencia para este evento.");
-          }}
-        >
-          Reset presencia (evento)
-        </button>
+        {/* Botón de reset de presencia eliminado: no se usa en la nueva lógica */}
         
         {err && <div className="text-sm text-red-600">{err}</div>}
       </div>
@@ -756,14 +870,14 @@ function ScanTab({ event, secret, setLogs }) {
         </div>
       )}
       <div className="text-xs text-gray-600">
-        Nota: Sin servidor no es posible bloquear re-uso del mismo QR entre
-        dispositivos. Este MVP marca usos localmente.
+        Nota: Con múltiples puntos de control no se bloquea el re-uso del QR;
+        cada lectura se registra con fecha y hora para su control posterior en exportaciones.
       </div>
     </div>
   );
 }
 
-function ExportTab({ event, logs }) {
+function ExportTab({ event, logs, setLogs }) {
   const eventLogs = useMemo(
     () => logs.filter((l) => l.eventId === event.id),
     [logs, event.id]
@@ -779,7 +893,7 @@ function ExportTab({ event, logs }) {
               guestId: l.guestId || "",
               guestName: l.guestName || "",
               ok: l.ok ? "1" : "0",
-              action: l.action || "in",
+              action: l.action || "check",
               reason: l.reason || "",
               device: l.device,
             }));
@@ -790,33 +904,10 @@ function ExportTab({ event, logs }) {
           Exportar check-ins CSV
         </button>
 
+        
         <button
           className="px-4 py-2 rounded-xl border"
           onClick={() => {
-            const rows = eventLogs.map((l) => ({
-              when: l.whenISO,
-              guestId: l.guestId || "",
-              guestName: l.guestName || "",
-              action: (l.action || "in") === "out" ? "OUT" : "IN",
-              ok: l.ok ? "1" : "0",
-              reason: l.reason || "",
-              device: l.device,
-            }));
-            const csv = Papa.unparse(rows);
-            downloadBlob(`${slug(event.name)}_movimientos.csv`, "text/csv", csv);
-          }}
-        >
-          Exportar IN/OUT CSV
-        </button>
-
-        <button
-          className="px-4 py-2 rounded-xl border"
-          onClick={() => {
-            const presenceKey = `presence_${event.id}`;
-            let presence = {};
-            try {
-              presence = JSON.parse(localStorage.getItem(presenceKey) || "{}");
-            } catch {}
             const rows = event.guests.map((g) => ({
               id: g.id,
               name: g.name,
@@ -824,7 +915,7 @@ function ExportTab({ event, logs }) {
               role: g.role || "",
               note: g.note || "",
               registeredAt: g.registeredAt || g.expiresAt || "",
-              presence: presence[g.id] === "in" ? "IN" : "OUT",
+              presence: "",
             }));
             const csv = Papa.unparse(rows);
             downloadBlob(`${slug(event.name)}_invitados.csv`, "text/csv", csv);
@@ -842,6 +933,17 @@ function ExportTab({ event, logs }) {
         >
           Exportar evento JSON
         </button>
+
+        <button
+          className="px-4 py-2 rounded-xl border border-red-300 text-red-700 hover:bg-red-50"
+          onClick={() => {
+            if (confirm("¿Borrar TODOS los registros de este evento?")) {
+              setLogs((prev) => prev.filter((l) => l.eventId !== event.id));
+            }
+          }}
+        >
+          Borrar todos los registros
+        </button>
       </div>
       <div className="text-sm text-gray-600">Registros: {eventLogs.length}</div>
       <div className="max-h-80 overflow-auto border rounded-xl">
@@ -854,6 +956,7 @@ function ExportTab({ event, logs }) {
               <th className="p-2 text-left">OK</th>
               <th className="p-2 text-left">Motivo</th>
               <th className="p-2 text-left">Dispositivo</th>
+              <th className="p-2 text-left">Borrar</th>
             </tr>
             <tr>
               <th className="p-2 text-left">Fecha</th>
@@ -862,6 +965,7 @@ function ExportTab({ event, logs }) {
               <th className="p-2 text-left">OK</th>
               <th className="p-2 text-left">Motivo</th>
               <th className="p-2 text-left">Dispositivo</th>
+              <th className="p-2 text-left">Borrar</th>
             </tr>
           </thead>
           <tbody className="hidden">
@@ -874,11 +978,24 @@ function ExportTab({ event, logs }) {
                     {fmtDateTime(l.whenISO)}
                   </td>
                   <td className="p-2">{l.guestName || l.guestId || "-"}</td>
-                  <td className="p-2">{(l.action || "in") === "out" ? "OUT" : "IN"}</td>
+                  <td className="p-2">{(l.action || "check").toUpperCase()}</td>
                   <td className="p-2">{l.ok ? "✔" : "✖"}</td>
                   <td className="p-2">{l.reason || ""}</td>
                   <td className="p-2 truncate max-w-[16rem]" title={l.device}>
                     {l.device}
+                  </td>
+                  <td className="p-2">
+                    <button
+                      className="text-xs text-red-600 hover:underline"
+                      title="Borrar registro"
+                      onClick={() => {
+                        if (confirm("¿Borrar registro?")) {
+                          setLogs((prev) => prev.filter((x) => x.id !== l.id));
+                        }
+                      }}
+                    >
+                      🗑️
+                    </button>
                   </td>
                 </tr>
               ))}
@@ -891,10 +1008,23 @@ function ExportTab({ event, logs }) {
                 <tr key={l.id} className="border-t">
                   <td className="p-2 whitespace-nowrap">{fmtDateTime(l.whenISO)}</td>
                   <td className="p-2">{l.guestName || l.guestId || "-"}</td>
-                  <td className="p-2">{(l.action || "in") === "out" ? "OUT" : "IN"}</td>
+                  <td className="p-2">{(l.action || "check").toUpperCase()}</td>
                   <td className="p-2">{l.ok ? "OK" : "X"}</td>
                   <td className="p-2">{l.reason || ""}</td>
                   <td className="p-2 truncate max-w-[16rem]" title={l.device}>{l.device}</td>
+                  <td className="p-2">
+                    <button
+                      className="text-xs text-red-600 hover:underline"
+                      title="Borrar registro"
+                      onClick={() => {
+                        if (confirm("¿Borrar registro?")) {
+                          setLogs((prev) => prev.filter((x) => x.id !== l.id));
+                        }
+                      }}
+                    >
+                      🗑️
+                    </button>
+                  </td>
                 </tr>
               ))}
           </tbody>
