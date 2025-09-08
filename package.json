@@ -1,6 +1,6 @@
 {
   "name": "qr_app",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "private": true,
   "description": "QR Access Control desktop app (Electron + Vite)",
   "author": "",
