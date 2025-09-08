@@ -358,14 +358,18 @@ function GuestListTab({ event, removeGuest, updateGuest, secret }) {
                   <button
                     className={`text-xs px-2 py-1 rounded-lg border ${
                       g.emailSent
-                        ? "bg-green-100 text-green-800 border-green-600 cursor-default"
+                        ? "bg-green-100 text-green-800 border-green-600"
                         : "hover:bg-gray-100"
                     }`}
-                    disabled={!!g.emailSent}
                     onClick={() =>
-                      updateGuest(g.id, { emailSent: true, emailSentAt: nowISO() })
+                      updateGuest(
+                        g.id,
+                        g.emailSent
+                          ? { emailSent: false, emailSentAt: "" }
+                          : { emailSent: true, emailSentAt: nowISO() }
+                      )
                     }
-                    title={g.emailSent ? "Ya enviado" : "Marcar como enviado"}
+                    title={g.emailSent ? "Desmarcar enviado" : "Marcar como enviado"}
                   >
                     {g.emailSent ? "Ya enviado" : "Marcar enviado"}
                   </button>
