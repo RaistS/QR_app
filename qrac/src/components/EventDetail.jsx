@@ -341,6 +341,19 @@ function GuestListTab({ event, removeGuest, updateGuest, secret }) {
                   {sending ? "Enviando..." : "Enviar QR"}
                 </button> */}
                 <QRButton eventId={event.id} guest={g} secret={secret} />
+                {g.email && (
+                  <a
+                    href={`mailto:${encodeURIComponent(g.email)}?subject=${encodeURIComponent(
+                      `Invitación al evento: ${event.name}`
+                    )}&body=${encodeURIComponent(
+                      `Hola ${g.name},\n\nAquí tienes tu invitación para el evento "${event.name}".\n\nRecuerda traer tu QR para acceder.\n\n¡Nos vemos!\n`
+                    )}`}
+                    className="text-xs px-2 py-1 rounded-lg border hover:bg-gray-100"
+                    title={`Enviar correo a ${g.email}`}
+                  >
+                    Enviar correo
+                  </a>
+                )}
                 <button
                   className="text-xs text-red-600 hover:underline"
                   onClick={() => {
