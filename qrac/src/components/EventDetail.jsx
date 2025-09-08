@@ -354,6 +354,30 @@ function GuestListTab({ event, removeGuest, updateGuest, secret }) {
                     Enviar correo
                   </a>
                 )}
+                <button
+                  className="text-xs px-2 py-1 rounded-lg border hover:bg-gray-100"
+                  title="Descargar QR y token"
+                  onClick={async () => {
+                    try {
+                      const payload = makePayload({ eventId: event.id, guest: g });
+                      const t = await tokenFromPayload(payload, secret);
+                      const dataUrl = await QRCode.toDataURL(t, { margin: 1, scale: 8 });
+                      const base = `${slug(event.name)}_${slug(g.name)}`;
+                      // Descargar PNG
+                      const a = document.createElement("a");
+                      a.href = dataUrl;
+                      a.download = `${base}_QR.png`;
+                      a.click();
+                      // Descargar TXT con token
+                      downloadBlob(`${base}_TOKEN.txt`, "text/plain", t);
+                    } catch (e) {
+                      alert("No se pudo generar el QR/token");
+                      console.error(e);
+                    }
+                  }}
+                >
+                  Descargar QR+token
+                </button>
                 {g.email && (
                   <button
                     className={`text-xs px-2 py-1 rounded-lg border ${
