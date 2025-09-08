@@ -378,6 +378,87 @@ function GuestListTab({ event, removeGuest, updateGuest, secret }) {
                 >
                   Descargar QR+token
                 </button>
+                <button
+                  className="text-xs px-2 py-1 rounded-lg border hover:bg-gray-100"
+                  title="Descargar PNG con nombre y token"
+                  onClick={async () => {
+                    try {
+                      const payload = makePayload({ eventId: event.id, guest: g });
+                      const t = await tokenFromPayload(payload, secret);
+                      const qrUrl = await QRCode.toDataURL(t, { margin: 1, scale: 8 });
+
+                      const canvas = document.createElement('canvas');
+                      const ctx = canvas.getContext('2d');
+
+                      const pad = 24;
+                      const width = 720;
+                      const qrSize = 480;
+                      const nameFont = 'bold 28px system-ui, -apple-system, Segoe UI, Roboto, sans-serif';
+                      const tokenFont = '600 14px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace';
+                      const lineGap = 6;
+                      const nameGap = 16;
+                      const qrGap = 16;
+
+                      // Preparar líneas de token (troceado fijo para ajustar ancho)
+                      const chunk = (s, n) => s.match(new RegExp(`.{1,${32}}`, 'g')) || [s];
+                      const tokenLines = chunk(t, 32);
+                      const tokenLineHeight = 18; // px
+                      const tokenBlockHeight = tokenLines.length * tokenLineHeight + (tokenLines.length - 1) * lineGap;
+
+                      // Calcular alto total
+                      const height = pad + 32 /*aprox alto nombre*/ + nameGap + qrSize + qrGap + tokenBlockHeight + pad;
+                      canvas.width = width;
+                      canvas.height = height;
+
+                      // Fondo blanco
+                      ctx.fillStyle = '#ffffff';
+                      ctx.fillRect(0, 0, width, height);
+
+                      // Nombre centrado arriba
+                      ctx.fillStyle = '#111827';
+                      ctx.font = nameFont;
+                      ctx.textAlign = 'center';
+                      ctx.textBaseline = 'top';
+                      ctx.fillText(g.name || 'Invitado', width / 2, pad);
+
+                      // Cargar QR y dibujar centrado
+                      await new Promise((resolve, reject) => {
+                        const img = new Image();
+                        img.onload = () => {
+                          const x = (width - qrSize) / 2;
+                          const y = pad + 32 + nameGap; // debajo del nombre
+                          ctx.drawImage(img, x, y, qrSize, qrSize);
+                          resolve();
+                        };
+                        img.onerror = reject;
+                        img.src = qrUrl;
+                      });
+
+                      // Token abajo, centrado, en varias líneas
+                      ctx.font = tokenFont;
+                      ctx.fillStyle = '#374151';
+                      ctx.textAlign = 'center';
+                      ctx.textBaseline = 'top';
+                      let y = pad + 32 + nameGap + qrSize + qrGap;
+                      for (const line of tokenLines) {
+                        ctx.fillText(line, width / 2, y);
+                        y += tokenLineHeight + lineGap;
+                      }
+
+                      // Descargar imagen compuesta
+                      const base = `${slug(event.name)}_${slug(g.name)}`;
+                      const a = document.createElement('a');
+                      a.href = canvas.toDataURL('image/png');
+                      a.download = `${base}_tarjeta.png`;
+                      a.click();
+                    } catch (e) {
+                      alert('No se pudo generar la tarjeta');
+                      console.error(e);
+                    }
+                  }}
+                >
+                  Descargar tarjeta (PNG)
+                </button>
                 {g.email && (
                   <button
                     className={`text-xs px-2 py-1 rounded-lg border ${
