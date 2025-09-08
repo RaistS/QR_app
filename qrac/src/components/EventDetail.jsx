@@ -904,25 +904,7 @@ function ExportTab({ event, logs, setLogs }) {
           Exportar check-ins CSV
         </button>
 
-        <button
-          className="px-4 py-2 rounded-xl border"
-          onClick={() => {
-            const rows = eventLogs.map((l) => ({
-              when: l.whenISO,
-              guestId: l.guestId || "",
-              guestName: l.guestName || "",
-              action: (l.action || "in") === "out" ? "OUT" : "IN",
-              ok: l.ok ? "1" : "0",
-              reason: l.reason || "",
-              device: l.device,
-            }));
-            const csv = Papa.unparse(rows);
-            downloadBlob(`${slug(event.name)}_movimientos.csv`, "text/csv", csv);
-          }}
-        >
-          Exportar IN/OUT CSV
-        </button>
-
+        
         <button
           className="px-4 py-2 rounded-xl border"
           onClick={() => {
