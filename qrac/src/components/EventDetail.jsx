@@ -116,7 +116,9 @@ export default function EventDetail({ event, setEvents, secret, logs, setLogs })
       {tab === "scan" && (
         <ScanTab event={event} secret={secret} setLogs={setLogs} />
       )}
-      {tab === "export" && <ExportTab event={event} logs={logs} />}
+      {tab === "export" && (
+        <ExportTab event={event} logs={logs} setLogs={setLogs} />
+      )}
       {tab === "print" && <PrintTab event={event} secret={secret} />}
     </div>
   );
@@ -961,6 +963,7 @@ function ExportTab({ event, logs }) {
               <th className="p-2 text-left">OK</th>
               <th className="p-2 text-left">Motivo</th>
               <th className="p-2 text-left">Dispositivo</th>
+              <th className="p-2 text-left">Borrar</th>
             </tr>
             <tr>
               <th className="p-2 text-left">Fecha</th>
@@ -969,6 +972,7 @@ function ExportTab({ event, logs }) {
               <th className="p-2 text-left">OK</th>
               <th className="p-2 text-left">Motivo</th>
               <th className="p-2 text-left">Dispositivo</th>
+              <th className="p-2 text-left">Borrar</th>
             </tr>
           </thead>
           <tbody className="hidden">
@@ -987,6 +991,19 @@ function ExportTab({ event, logs }) {
                   <td className="p-2 truncate max-w-[16rem]" title={l.device}>
                     {l.device}
                   </td>
+                  <td className="p-2">
+                    <button
+                      className="text-xs text-red-600 hover:underline"
+                      title="Borrar registro"
+                      onClick={() => {
+                        if (confirm("¿Borrar registro?")) {
+                          setLogs((prev) => prev.filter((x) => x.id !== l.id));
+                        }
+                      }}
+                    >
+                      🗑️
+                    </button>
+                  </td>
                 </tr>
               ))}
           </tbody>
@@ -1002,6 +1019,19 @@ function ExportTab({ event, logs }) {
                   <td className="p-2">{l.ok ? "OK" : "X"}</td>
                   <td className="p-2">{l.reason || ""}</td>
                   <td className="p-2 truncate max-w-[16rem]" title={l.device}>{l.device}</td>
+                  <td className="p-2">
+                    <button
+                      className="text-xs text-red-600 hover:underline"
+                      title="Borrar registro"
+                      onClick={() => {
+                        if (confirm("¿Borrar registro?")) {
+                          setLogs((prev) => prev.filter((x) => x.id !== l.id));
+                        }
+                      }}
+                    >
+                      🗑️
+                    </button>
+                  </td>
                 </tr>
               ))}
           </tbody>
