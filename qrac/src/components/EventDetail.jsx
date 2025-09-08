@@ -739,28 +739,10 @@ function ScanTab({ event, secret, setLogs }) {
         });
         return;
       }
-      // Presence map per event: { [guestId]: 'in' | 'out' }
-      const presenceKey = `presence_${event.id}`;
-      const presence = (() => {
-        try { return JSON.parse(localStorage.getItem(presenceKey) || "{}"); } catch { return {}; }
-      })();
-      const current = presence[guest.id] === "in" ? "in" : "out";
-
-      if (current === "in") {
-        // Toggle to check-out
-        persistLog({ ok: true, guest, action: "out" });
-        presence[guest.id] = "out";
-        localStorage.setItem(presenceKey, JSON.stringify(presence));
-        beep(true);
-        setLast({ raw: token, status: "ok", guest });
-      } else {
-        // Toggle to check-in
-        persistLog({ ok: true, guest, action: "in" });
-        presence[guest.id] = "in";
-        localStorage.setItem(presenceKey, JSON.stringify(presence));
-        beep(true);
-        setLast({ raw: token, status: "ok", guest });
-      }
+      // Nueva lógica: sin control IN/OUT, solo registrar cada check con hora
+      persistLog({ ok: true, guest, action: "check" });
+      beep(true);
+      setLast({ raw: token, status: "ok", guest });
     } else {
       persistLog({ ok: false, reason: res.reason });
       beep(false);
@@ -798,15 +780,7 @@ function ScanTab({ event, secret, setLogs }) {
         >
           Cerrar cámara
         </button>
-        <button
-          className="px-4 py-2 rounded-xl border"
-          onClick={() => {
-            localStorage.removeItem(`presence_${event.id}`);
-            alert("Reseteado el estado de presencia para este evento.");
-          }}
-        >
-          Reset presencia (evento)
-        </button>
+        {/* Botón de reset de presencia eliminado: no se usa en la nueva lógica */}
         
         {err && <div className="text-sm text-red-600">{err}</div>}
       </div>
@@ -894,8 +868,8 @@ function ScanTab({ event, secret, setLogs }) {
         </div>
       )}
       <div className="text-xs text-gray-600">
-        Nota: Sin servidor no es posible bloquear re-uso del mismo QR entre
-        dispositivos. Este MVP marca usos localmente.
+        Nota: Con múltiples puntos de control no se bloquea el re-uso del QR;
+        cada lectura se registra con fecha y hora para su control posterior en exportaciones.
       </div>
     </div>
   );
@@ -917,7 +891,7 @@ function ExportTab({ event, logs }) {
               guestId: l.guestId || "",
               guestName: l.guestName || "",
               ok: l.ok ? "1" : "0",
-              action: l.action || "in",
+              action: l.action || "check",
               reason: l.reason || "",
               device: l.device,
             }));
@@ -950,11 +924,6 @@ function ExportTab({ event, logs }) {
         <button
           className="px-4 py-2 rounded-xl border"
           onClick={() => {
-            const presenceKey = `presence_${event.id}`;
-            let presence = {};
-            try {
-              presence = JSON.parse(localStorage.getItem(presenceKey) || "{}");
-            } catch {}
             const rows = event.guests.map((g) => ({
               id: g.id,
               name: g.name,
@@ -962,7 +931,7 @@ function ExportTab({ event, logs }) {
               role: g.role || "",
               note: g.note || "",
               registeredAt: g.registeredAt || g.expiresAt || "",
-              presence: presence[g.id] === "in" ? "IN" : "OUT",
+              presence: "",
             }));
             const csv = Papa.unparse(rows);
             downloadBlob(`${slug(event.name)}_invitados.csv`, "text/csv", csv);
@@ -1012,7 +981,7 @@ function ExportTab({ event, logs }) {
                     {fmtDateTime(l.whenISO)}
                   </td>
                   <td className="p-2">{l.guestName || l.guestId || "-"}</td>
-                  <td className="p-2">{(l.action || "in") === "out" ? "OUT" : "IN"}</td>
+                  <td className="p-2">{(l.action || "check").toUpperCase()}</td>
                   <td className="p-2">{l.ok ? "✔" : "✖"}</td>
                   <td className="p-2">{l.reason || ""}</td>
                   <td className="p-2 truncate max-w-[16rem]" title={l.device}>
@@ -1029,7 +998,7 @@ function ExportTab({ event, logs }) {
                 <tr key={l.id} className="border-t">
                   <td className="p-2 whitespace-nowrap">{fmtDateTime(l.whenISO)}</td>
                   <td className="p-2">{l.guestName || l.guestId || "-"}</td>
-                  <td className="p-2">{(l.action || "in") === "out" ? "OUT" : "IN"}</td>
+                  <td className="p-2">{(l.action || "check").toUpperCase()}</td>
                   <td className="p-2">{l.ok ? "OK" : "X"}</td>
                   <td className="p-2">{l.reason || ""}</td>
                   <td className="p-2 truncate max-w-[16rem]" title={l.device}>{l.device}</td>
