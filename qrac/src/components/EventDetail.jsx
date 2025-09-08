@@ -877,7 +877,7 @@ function ScanTab({ event, secret, setLogs }) {
   );
 }
 
-function ExportTab({ event, logs }) {
+function ExportTab({ event, logs, setLogs }) {
   const eventLogs = useMemo(
     () => logs.filter((l) => l.eventId === event.id),
     [logs, event.id]
@@ -950,6 +950,17 @@ function ExportTab({ event, logs }) {
           }}
         >
           Exportar evento JSON
+        </button>
+
+        <button
+          className="px-4 py-2 rounded-xl border border-red-300 text-red-700 hover:bg-red-50"
+          onClick={() => {
+            if (confirm("¿Borrar TODOS los registros de este evento?")) {
+              setLogs((prev) => prev.filter((l) => l.eventId !== event.id));
+            }
+          }}
+        >
+          Borrar todos los registros
         </button>
       </div>
       <div className="text-sm text-gray-600">Registros: {eventLogs.length}</div>
