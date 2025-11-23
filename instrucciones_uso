@@ -1,11 +1,43 @@
-Cómo ejecutar
+CÓMO USAR LA APLICACIÓN
 
-Backend API: en la raíz
-Instalar deps: npm install
-Arrancar API: npm start (escucha en :3001)
-Frontend (build para Electron):
-Instalar deps: cd qrac && npm install
-Build: desde la raíz npm run build:web (genera qrac/dist)
-Electron (app de escritorio):
-Desarrollo empaquetado sencillo: npm run dev:electron (usa qrac/dist)
-Empaquetar Windows (si tienes electron-builder): npm run pack:win
+1) Requisitos previos
+- Node.js 18+.
+- Windows si quieres generar el instalador .exe.
+
+2) Instalación
+- En la raíz: npm install
+- Frontend: cd qrac && npm install && cd ..
+
+3) Variables .env (solo si vas a enviar correos desde server.js)
+PORT=3001
+SMTP_HOST=smtp.example.com
+SMTP_PORT=587
+SMTP_TLS=true
+SMTP_USERNAME=usuario@example.com
+SMTP_PASSWORD=contraseña
+MAIL_FROM=usuario@example.com
+MAIL_FROM_NAME=QR Access Control
+(Opcional Azure OAuth2) AZURE_TENANT_ID / AZURE_CLIENT_ID / AZURE_CLIENT_SECRET
+
+4) Ejecutar en desarrollo
+- Backend API: npm start (escucha en http://localhost:3001)
+- Frontend Vite: cd qrac && npm run dev (http://localhost:5173, proxy /api -> 3001)
+- Electron en dev: npm run dev:electron (construye el frontend y abre la app de escritorio)
+
+5) Uso básico en la app
+- Crear evento: en la columna izquierda, pon nombre/fecha/ubicación y pulsa “Crear”.
+- Añadir invitados: pestaña “Gestión”, alta manual o importar CSV (cabeceras name,email,role,note,registeredAt).
+- Generar QR: en “Listado” cada invitado tiene botón “Ver QR”, “Descargar QR+token” o “Descargar tarjeta”.
+- Escanear: pestaña “Escanear”, abre cámara o carga imagen; también puedes pegar el token. Guarda cada check-in con hora.
+- Exportar: pestaña “Exportar” → “Exportar check-ins CSV” o “Exportar invitados CSV”.
+- Backup completo: en la barra izquierda botón “Exportar JSON” (incluye eventos, invitados, logs y secreto); puedes importar el JSON desde el mismo sitio.
+
+6) Empaquetar la app de escritorio (Windows)
+- Icono (si cambias PNG): npm run icon:build
+- Build frontend: npm run build:web
+- Empaquetar: npm run pack:win (o npm run pack:win:nosign)
+- Salida: instalador en dist/QR Access Control Setup <versión>.exe y versión portable en dist/win-unpacked/QR Access Control.exe
+
+7) Notas
+- Las horas de check-ins se exportan ya en horario de Madrid.
+- No subas .env ni artefactos (dist, node_modules) a Git.
