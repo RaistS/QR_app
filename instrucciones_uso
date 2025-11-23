@@ -1,11 +1,11 @@
-CÓMO USAR LA APLICACIÓN
+COMO USAR LA APLICACION
 
 1) Requisitos previos
-- Node.js 18+.
-- Windows si quieres generar el instalador .exe.
+- Node.js 18+
+- Windows si quieres generar el instalador .exe
 
-2) Instalación
-- En la raíz: npm install
+2) Instalacion
+- Raiz: npm install
 - Frontend: cd qrac && npm install && cd ..
 
 3) Variables .env (solo si vas a enviar correos desde server.js)
@@ -14,30 +14,30 @@ SMTP_HOST=smtp.example.com
 SMTP_PORT=587
 SMTP_TLS=true
 SMTP_USERNAME=usuario@example.com
-SMTP_PASSWORD=contraseña
+SMTP_PASSWORD=contrasena
 MAIL_FROM=usuario@example.com
 MAIL_FROM_NAME=QR Access Control
-(Opcional Azure OAuth2) AZURE_TENANT_ID / AZURE_CLIENT_ID / AZURE_CLIENT_SECRET
+Opcional OAuth2 Azure: AZURE_TENANT_ID / AZURE_CLIENT_ID / AZURE_CLIENT_SECRET
 
 4) Ejecutar en desarrollo
-- Backend API: npm start (escucha en http://localhost:3001)
+- Backend API: npm start (http://localhost:3001)
 - Frontend Vite: cd qrac && npm run dev (http://localhost:5173, proxy /api -> 3001)
-- Electron en dev: npm run dev:electron (construye el frontend y abre la app de escritorio)
+- Electron dev: npm run dev:electron (build del frontend y abre la app de escritorio)
 
-5) Uso básico en la app
-- Crear evento: en la columna izquierda, pon nombre/fecha/ubicación y pulsa “Crear”.
-- Añadir invitados: pestaña “Gestión”, alta manual o importar CSV (cabeceras name,email,role,note,registeredAt).
-- Generar QR: en “Listado” cada invitado tiene botón “Ver QR”, “Descargar QR+token” o “Descargar tarjeta”.
-- Escanear: pestaña “Escanear”, abre cámara o carga imagen; también puedes pegar el token. Guarda cada check-in con hora.
-- Exportar: pestaña “Exportar” → “Exportar check-ins CSV” o “Exportar invitados CSV”.
-- Backup completo: en la barra izquierda botón “Exportar JSON” (incluye eventos, invitados, logs y secreto); puedes importar el JSON desde el mismo sitio.
+5) Uso basico en la app
+- Crear evento: en la columna izquierda, nombre/fecha/ubicacion y pulsa "Crear".
+- Anadir invitados: pestana "Gestion", alta manual o importar CSV (name,email,role,note,registeredAt).
+- Generar QR: en "Listado" cada invitado tiene "Ver QR", "Descargar QR+token" o "Descargar tarjeta".
+- Escanear: pestana "Escanear", abre camara o carga imagen; tambien puedes pegar el token. Guarda cada check-in con hora.
+- Exportar: pestana "Exportar" -> "Exportar check-ins CSV" o "Exportar invitados CSV".
+- Backup completo: en la barra izquierda "Exportar JSON" (eventos, invitados, logs y secreto); puedes importar el JSON desde el mismo sitio.
 
 6) Empaquetar la app de escritorio (Windows)
 - Icono (si cambias PNG): npm run icon:build
 - Build frontend: npm run build:web
 - Empaquetar: npm run pack:win (o npm run pack:win:nosign)
-- Salida: instalador en dist/QR Access Control Setup <versión>.exe y versión portable en dist/win-unpacked/QR Access Control.exe
+- Salida: instalador en dist/QR Access Control Setup <version>.exe y portable en dist/win-unpacked/QR Access Control.exe
 
 7) Notas
-- Las horas de check-ins se exportan ya en horario de Madrid.
+- Las horas de check-ins se exportan en horario de Madrid.
 - No subas .env ni artefactos (dist, node_modules) a Git.
