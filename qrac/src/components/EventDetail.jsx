@@ -882,6 +882,25 @@ function ExportTab({ event, logs, setLogs }) {
     () => logs.filter((l) => l.eventId === event.id),
     [logs, event.id]
   );
+
+  // Formatea la fecha en horario de Madrid (UTC+1 / UTC+2 con DST) sin mostrar offset.
+  const formatMadrid = (iso) => {
+    const date = new Date(iso);
+    const parts = new Intl.DateTimeFormat("en-CA", {
+      timeZone: "Europe/Madrid",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      hour12: false,
+    })
+      .formatToParts(date)
+      .reduce((acc, p) => ({ ...acc, [p.type]: p.value }), {});
+    return `${parts.year}-${parts.month}-${parts.day} ${parts.hour}:${parts.minute}:${parts.second}`;
+  };
+
   return (
     <div className="mt-4 grid gap-4">
       <div className="flex flex-wrap gap-2">
@@ -889,7 +908,7 @@ function ExportTab({ event, logs, setLogs }) {
           className="px-4 py-2 rounded-xl border"
           onClick={() => {
             const rows = eventLogs.map((l) => ({
-              when: l.whenISO,
+              when: formatMadrid(l.whenISO),
               guestId: l.guestId || "",
               guestName: l.guestName || "",
               ok: l.ok ? "1" : "0",
@@ -925,16 +944,6 @@ function ExportTab({ event, logs, setLogs }) {
         </button>
 
         <button
-          className="px-4 py-2 rounded-xl border"
-          onClick={() => {
-            const json = JSON.stringify(event, null, 2);
-            downloadBlob(`${slug(event.name)}.json`, "application/json", json);
-          }}
-        >
-          Exportar evento JSON
-        </button>
-
-        <button
           className="px-4 py-2 rounded-xl border border-red-300 text-red-700 hover:bg-red-50"
           onClick={() => {
             if (confirm("¿Borrar TODOS los registros de este evento?")) {
@@ -952,7 +961,7 @@ function ExportTab({ event, logs, setLogs }) {
             <tr className="hidden">
               <th className="p-2 text-left">Fecha</th>
               <th className="p-2 text-left">Invitado</th>
-              <th className="p-2 text-left">Acci��n</th>
+              <th className="p-2 text-left">Acci?n</th>
               <th className="p-2 text-left">OK</th>
               <th className="p-2 text-left">Motivo</th>
               <th className="p-2 text-left">Dispositivo</th>
