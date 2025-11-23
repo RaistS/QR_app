@@ -6,7 +6,10 @@ COMO USAR LA APLICACION
 
 2) Instalacion
 - Raiz: npm install
-- Frontend: cd qrac && npm install && cd ..
+- Frontend:
+  - cd qrac
+  - npm install
+  - cd ..
 
 3) Variables .env (solo si vas a enviar correos desde server.js)
 PORT=3001
